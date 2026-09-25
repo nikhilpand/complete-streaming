@@ -80,9 +80,10 @@ class Track(BaseModel):
     # Factual features
     id: str
     title: str
-    artist_id: str
-    artist_name: str
+    artist_id: str = ""
+    artist_name: str = ""
     artists: list[ArtistRole] = Field(default_factory=list)
+    album: Optional[str] = None
     album_id: Optional[str] = None
     album_name: Optional[str] = None
     year: Optional[int] = None
@@ -104,8 +105,30 @@ class Track(BaseModel):
     energy_feature: FeatureValue[float] = Field(default_factory=FeatureValue[float])
     bpm_feature: FeatureValue[float] = Field(default_factory=FeatureValue[float])
 
+    @model_validator(mode="before")
+    @classmethod
+    def _default_artist(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "artists" in data and data["artists"] and not data.get("artist_name"):
+                first = data["artists"][0]
+                if isinstance(first, dict):
+                    data.setdefault("artist_id", first.get("id", ""))
+                    data.setdefault("artist_name", first.get("name", ""))
+                elif hasattr(first, "name"):
+                    data.setdefault("artist_id", getattr(first, "id", ""))
+                    data.setdefault("artist_name", getattr(first, "name", ""))
+        return data
+
     @model_validator(mode="after")
     def _sync_provenance(self) -> Track:
+        if not self.artist_name and self.artists:
+            self.artist_name = self.artists[0].name
+            if not self.artist_id:
+                self.artist_id = self.artists[0].id
+        if not self.album and self.album_name:
+            self.album = self.album_name
+        elif self.album and not self.album_name:
+            self.album_name = self.album
         if self.energy is not None and self.energy_feature.value is None:
             self.energy_feature = FeatureValue[float](value=self.energy, source="direct_input", confidence=1.0)
         elif self.energy is None and self.energy_feature.value is not None:
@@ -125,7 +148,7 @@ class Track(BaseModel):
 class UserEvent(BaseModel):
     event_id: str
     user_id: str
-    session_id: str
+    session_id: str = "sess_default"
     event_type: EventType
     account_id: Optional[str] = None
     anonymous_id: Optional[str] = None
@@ -135,6 +158,7 @@ class UserEvent(BaseModel):
     position_ms: Optional[int] = Field(default=None, ge=0)
     duration_ms: Optional[int] = Field(default=None, ge=0)
     completion_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    effective_weight: float = 1.0
     source: Optional[str] = None
     recommendation_id: Optional[str] = None
     query: Optional[str] = None
@@ -189,6 +213,14 @@ class HorizonTasteState(BaseModel):
     composer: dict[str, Bucket] = Field(default_factory=dict)
     mean_energy: Optional[float] = None
 
+    @property
+    def artist_affinity(self) -> dict[str, float]:
+        return {k: b.net for k, b in self.artist.items()}
+
+    @property
+    def genre_affinity(self) -> dict[str, float]:
+        return {k: b.net for k, b in self.genre.items()}
+
 
 class SessionTasteState(BaseModel):
     """Immediate listening context within the active session."""
@@ -209,6 +241,7 @@ class NegativeMemoryState(BaseModel):
 class UserTasteProfile(BaseModel):
     user_id: str
     updated_at: datetime = Field(default_factory=utcnow)
+    total_events: int = 0
 
     # Multi-horizon state
     long_term: HorizonTasteState = Field(default_factory=HorizonTasteState)
@@ -226,8 +259,16 @@ class UserTasteProfile(BaseModel):
         return self.recent_30d.artist
 
     @property
+    def artist_affinity(self) -> dict[str, float]:
+        return self.recent_30d.artist_affinity
+
+    @property
     def genre(self) -> dict[str, Bucket]:
         return self.recent_30d.genre
+
+    @property
+    def genre_affinity(self) -> dict[str, float]:
+        return self.recent_30d.genre_affinity
 
     @property
     def language(self) -> dict[str, Bucket]:

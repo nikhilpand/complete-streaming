@@ -21,6 +21,11 @@ from .config import (
     DecayConfig,
     EngineConfig,
 )
+from .storage import (
+    TasteStore,
+    SQLiteTasteStore,
+    InMemoryStore,
+)
 from .engine import RecommendationEngine
 
 __all__ = [
@@ -43,5 +48,8 @@ __all__ = [
     "QueueWeights",
     "DecayConfig",
     "EngineConfig",
+    "TasteStore",
+    "SQLiteTasteStore",
+    "InMemoryStore",
     "RecommendationEngine",
 ]
