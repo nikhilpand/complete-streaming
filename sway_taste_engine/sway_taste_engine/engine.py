@@ -9,8 +9,12 @@ from .retrieval import RetrieverRegistry
 from .storage import InMemoryStore
 class RecommendationEngine:
     ALGORITHM_VERSION="sway-rec-v1"; PROFILE_VERSION="profile-v1"
-    def __init__(self,store=None,track_similarity=None,artist_similarity=None):
-        self.store=store or InMemoryStore(); self.profile_builder=TasteProfileBuilder(); self.retrievers=RetrieverRegistry(track_similarity,artist_similarity); self.ranker=RuleBasedRanker(); self.diversity=DiversityReranker()
+    def __init__(self, store=None, track_similarity=None, artist_similarity=None):
+        self.store = store or InMemoryStore()
+        self.profile_builder = TasteProfileBuilder()
+        self.retrievers = RetrieverRegistry(track_similarity, artist_similarity, store=self.store)
+        self.ranker = RuleBasedRanker()
+        self.diversity = DiversityReranker()
     def ingest_event(self,event):
         ok=self.store.add_event(event)
         if ok:self.rebuild_profile(event.user_id)

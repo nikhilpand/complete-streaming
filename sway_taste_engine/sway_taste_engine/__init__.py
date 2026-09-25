@@ -29,6 +29,7 @@ from .storage import (
 from .metadata import extract_track_features, clean_track_id
 from .normalizer import EventNormalizer
 from .profile import TasteProfileBuilder
+from .similarity import SimilarityEngine
 from .engine import RecommendationEngine
 
 __all__ = [
@@ -58,5 +59,6 @@ __all__ = [
     "clean_track_id",
     "EventNormalizer",
     "TasteProfileBuilder",
+    "SimilarityEngine",
     "RecommendationEngine",
 ]
