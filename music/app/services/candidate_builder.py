@@ -239,12 +239,13 @@ class CandidateBuilder:
                 if getattr(a, "role", None) in {"composer", "music"} and a.name:
                     composers.append(a.name)
 
-        if composers:
-            c_songs = await self._safe_search(f"{composers[0]} soundtrack songs", n=20)
-            songs.extend(c_songs)
-        elif getattr(seed, "album", None):
-            alb_songs = await self._safe_search(f"{seed.album} songs", n=20)
+        if getattr(seed, "album", None):
+            alb_songs = await self._safe_search(f"{seed.album} songs", n=15)
             songs.extend(alb_songs)
+
+        if composers:
+            c_songs = await self._safe_search(f"{composers[0]} soundtrack songs", n=15)
+            songs.extend(c_songs)
 
         return songs[: self.budget.album_soundtrack]
 

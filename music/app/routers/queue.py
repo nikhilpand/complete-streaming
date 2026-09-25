@@ -109,9 +109,8 @@ async def get_next_queue(
     if provider and curr_song:
         try:
             builder = CandidateBuilder(provider, taste_store=engine.store)
-            retrieved_songs = await builder.build_candidate_pool(curr_song)
-            for s in retrieved_songs:
-                candidates.append(song_to_engine_track(s))
+            retrieved_tracks, _ = await builder.build_candidates(curr_song, profile=profile)
+            candidates.extend(retrieved_tracks)
         except Exception as e:
             logger.warning("Failed to build candidates with CandidateBuilder: %s", e)
 

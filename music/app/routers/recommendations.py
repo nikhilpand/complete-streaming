@@ -206,6 +206,196 @@ def post_event(e: EventIn):
     return {"ok": True, "accepted": accepted, "event": e.type, "track_id": sid}
 
 
+class ShadowModeComparator:
+    """
+    Shadow Mode comparator for online A/B or algorithm migration validation.
+    Runs side-by-side evaluation without user disruption.
+    """
+
+    @staticmethod
+    def compare(primary: Any, shadow: Any) -> dict[str, Any]:
+        def _extract_items(obj: Any) -> list[Any]:
+            if hasattr(obj, "items"):
+                return obj.items
+            if isinstance(obj, list):
+                return obj
+            return []
+
+        def _get_id(it: Any) -> str:
+            if hasattr(it, "track"):
+                return getattr(it.track, "id", "")
+            if hasattr(it, "id"):
+                return getattr(it, "id", "")
+            if isinstance(it, dict):
+                return str(it.get("id") or it.get("track_id") or "")
+            return str(it)
+
+        def _get_score(it: Any) -> float:
+            if hasattr(it, "score"):
+                return float(getattr(it, "score", 0.0))
+            if isinstance(it, dict):
+                return float(it.get("score", 0.0))
+            return 0.0
+
+        p_items = _extract_items(primary)
+        s_items = _extract_items(shadow)
+
+        p_ids = [_get_id(x) for x in p_items if _get_id(x)]
+        s_ids = [_get_id(x) for x in s_items if _get_id(x)]
+
+        p_set = set(p_ids)
+        s_set = set(s_ids)
+
+        overlap = len(p_set & s_set)
+        union = len(p_set | s_set)
+        jaccard = (overlap / union) if union > 0 else 1.0
+
+        p_scores = [_get_score(x) for x in p_items]
+        s_scores = [_get_score(x) for x in s_items]
+
+        p_mean = sum(p_scores) / len(p_scores) if p_scores else 0.0
+        s_mean = sum(s_scores) / len(s_scores) if s_scores else 0.0
+
+        return {
+            "primary_count": len(p_ids),
+            "shadow_count": len(s_ids),
+            "overlap_count": overlap,
+            "jaccard_divergence": round(1.0 - jaccard, 4),
+            "primary_mean_score": round(p_mean, 4),
+            "shadow_mean_score": round(s_mean, 4),
+            "top_1_match": (p_ids[0] == s_ids[0]) if (p_ids and s_ids) else False,
+        }
+
+
+@router.get("/recommendations/debug")
+@router.get("/debug")
+async def get_recommendations_debug(
+    request: Request,
+    user_id: str = "guest_user",
+    feed: str = "for_you",
+    feed_type: Optional[str] = None,
+    track_id: Optional[str] = None,
+    current_track_id: Optional[str] = None,
+    limit: int = Query(default=10, ge=1, le=50),
+    shadow: bool = Query(default=False),
+):
+    """
+    Observability endpoint providing complete score breakdown,
+    candidate generator counts, pruned tracks, and optional shadow mode comparison.
+    """
+    eng = get_taste_engine()
+    raw_track_id = current_track_id or track_id
+    curr_id = clean_track_id(raw_track_id) if raw_track_id else None
+
+    # Parse feed
+    selected_feed = feed_type or feed
+    try:
+        feed_enum = FeedType(selected_feed)
+    except ValueError:
+        feed_enum = FeedType.FOR_YOU
+
+    provider = getattr(request.app.state, "provider", None)
+    candidate_counts: dict[str, int] = {
+        "same_artist": 0,
+        "similar_artists": 0,
+        "album_soundtrack": 0,
+        "taste_neighbors": 0,
+        "collaborative": 0,
+        "discovery": 0,
+        "exploration": 0,
+    }
+
+    curr_song = None
+    if provider:
+        if curr_id:
+            try:
+                curr_song = await provider.get_song(curr_id)
+                if curr_song:
+                    seed_track = song_to_engine_track(curr_song)
+                    eng.seed_catalog([seed_track])
+            except Exception as ex:
+                logger.debug("Could not fetch current song %s: %s", curr_id, ex)
+
+        builder = CandidateBuilder(provider=provider, taste_store=eng.store)
+        profile = eng.store.get_profile(user_id)
+        discovered, counts = await builder.build_candidates(
+            seed_song=curr_song,
+            profile=profile,
+        )
+        if discovered:
+            eng.seed_catalog(discovered)
+        candidate_counts.update(counts)
+    else:
+        all_tracks = eng.store.all_tracks()
+        candidate_counts["taste_neighbors"] = len(all_tracks)
+
+    profile = eng.store.get_profile(user_id)
+    ctx = RecommendationContext(
+        current_track_id=curr_id,
+        session_id=f"sess_{user_id}",
+    )
+
+    resp = eng.recommend(user_id, feed=feed_enum, context=ctx, limit=limit)
+
+    # Pruned tracks
+    pruned: list[dict[str, str]] = [
+        {"track_id": tid, "reason": "explicit_negative"}
+        for tid in sorted(profile.explicit_negative_tracks)
+    ] + [
+        {"track_id": tid, "reason": "high_confidence_skip"}
+        for tid in sorted(profile.negative_memory.high_confidence_skips)
+    ]
+
+    items_debug = []
+    for item in resp.items:
+        artwork = _artwork_cache.get(item.track.id, "")
+        items_debug.append({
+            "id": item.track.id,
+            "track_id": item.track.id,
+            "title": item.track.title,
+            "artist": item.track.artist_name,
+            "album": item.track.album_name,
+            "artwork_url": artwork,
+            "score": round(item.score, 4),
+            "source": item.source,
+            "rank": item.rank,
+            "explanation": item.explanation.model_dump() if item.explanation else None,
+            "attribution": item.attribution.model_dump() if item.attribution else {
+                "total": round(item.score, 4),
+                "components": {
+                    "taste": 0.0,
+                    "session": 0.0,
+                    "similarity": 0.0,
+                    "novelty": 0.0,
+                    "freshness": 0.0,
+                    "popularity": 0.0,
+                    "energy_fit": 0.0,
+                },
+            },
+        })
+
+    debug_data: dict[str, Any] = {
+        "user_id": user_id,
+        "feed": feed_enum.value,
+        "algorithm_version": resp.algorithm_version,
+        "profile_version": resp.profile_version,
+        "candidate_counts_by_generator": candidate_counts,
+        "pruned_tracks": pruned,
+        "count": len(items_debug),
+        "items": items_debug,
+    }
+
+    if shadow:
+        shadow_ctx = RecommendationContext(current_track_id=None, session_id=None)
+        shadow_resp = eng.recommend(user_id, feed=FeedType.DISCOVER, context=shadow_ctx, limit=limit)
+        debug_data["shadow_comparison"] = ShadowModeComparator.compare(resp.items, shadow_resp.items)
+
+    return {
+        "success": True,
+        "data": debug_data,
+    }
+
+
 @router.get("/recommendations")
 @router.get("/users/{uid}/recommendations")
 async def get_recommendations(
