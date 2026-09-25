@@ -11,15 +11,35 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import type { SearchResponseData, Song, SearchResultItem } from '@/lib/api/types';
 
 function toSong(item: SearchResultItem): Song {
-  const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
-  const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
-  const albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
+  let artists: { id: string; name: string; role: string }[] = [];
+  let albumName: string | undefined;
+
+  if (item.provider === 'youtube') {
+    artists = (item.subtitle || 'YouTube Music')
+      .split(',')
+      .map((name) => ({ id: '', name: name.trim(), role: 'primary' }))
+      .filter((a) => a.name.length > 0);
+    albumName = item.extra?.album;
+  } else {
+    const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
+    const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+    artists = [{ id: '', name: artistName, role: 'primary' }];
+    albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
+  }
+
   return {
-    id: item.id, provider: item.provider, provider_id: item.provider_id,
-    type: 'song', title: item.title, subtitle: item.subtitle,
-    artists: [{ id: '', name: artistName, role: 'primary' }],
+    id: item.id,
+    provider: item.provider,
+    provider_id: item.provider_id,
+    type: 'song',
+    title: item.title,
+    subtitle: item.subtitle,
+    artists: artists.length > 0 ? artists : [{ id: '', name: 'Artist', role: 'primary' }],
     album: albumName,
-    artwork_url: item.artwork_url, has_media: true,
+    duration_ms: item.extra?.duration_ms,
+    artwork_url: item.artwork_url,
+    is_explicit: Boolean(item.extra?.is_explicit),
+    has_media: true,
   };
 }
 
@@ -71,10 +91,16 @@ export default function SearchPage() {
   const songs = results?.songs ?? [];
   const artists = results?.artists ?? [];
   const albums = results?.albums ?? [];
-  // Prefer enriched_songs (full Song objects) over raw results
-  const songObjects: Song[] = results?.enriched_songs?.length
-    ? results.enriched_songs
-    : songs.map(toSong);
+
+  // Map enriched songs by ID for fast lookup
+  const enrichedMap = new Map<string, Song>();
+  results?.enriched_songs?.forEach((s) => {
+    if (s.id) enrichedMap.set(s.id, s);
+    if (s.provider_id) enrichedMap.set(s.provider_id, s);
+  });
+
+  // Preserve the exact ranking and full list of songs
+  const songObjects: Song[] = songs.map((s) => enrichedMap.get(s.id) || enrichedMap.get(s.provider_id) || toSong(s));
 
 
   const TABS: { key: Tab; label: string }[] = [

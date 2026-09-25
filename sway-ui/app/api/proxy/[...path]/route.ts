@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 const BACKEND = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
 function buildBackendUrl(path: string[], searchParams: URLSearchParams) {
-  const cleanPath = path.map((segment) => segment.replace(/^[a-zA-Z0-9_-]+:/, ''));
+  const cleanPath = path.map((segment) => {
+    if (segment.startsWith('youtube:') || segment.startsWith('yt:')) {
+      return segment;
+    }
+    return segment.replace(/^saavn:/, '');
+  });
   const backendPath = '/api/v1/' + cleanPath.join('/');
 
   // Sanitize query params

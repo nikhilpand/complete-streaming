@@ -10,7 +10,7 @@ from fastapi import APIRouter, Query, Request
 
 from app.config import settings
 from app.core.errors import ProviderInvalidRequest, ProviderNotFound
-from app.models import APIResponse
+from app.models import APIResponse, Song
 
 router = APIRouter(prefix="/songs", tags=["Songs"])
 
@@ -104,19 +104,22 @@ async def get_media(request: Request, song_id: str):
     """
     provider = request.app.state.provider
     sid = song_id.strip()
-    if sid.startswith("youtube:") or sid.startswith("yt:"):
-        vid = _validate_id(sid)
-        song = Song(
-            id=f"youtube:{vid}",
-            provider="youtube",
-            provider_id=vid,
-            title="",
-            artists=[],
-            featured_artists=[],
-            has_media=True,
-        )
-    else:
-        song = await _resolve_or_search_song(provider, song_id)
+    try:
+        song = await _resolve_or_search_song(provider, sid)
+    except Exception:
+        if sid.startswith("youtube:") or sid.startswith("yt:"):
+            vid = _validate_id(sid)
+            song = Song(
+                id=f"youtube:{vid}",
+                provider="youtube",
+                provider_id=vid,
+                title="",
+                artists=[],
+                featured_artists=[],
+                has_media=True,
+            )
+        else:
+            raise
     media = await provider.resolve_media(song)
     return APIResponse(
         success=True,

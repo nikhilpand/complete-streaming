@@ -19,9 +19,22 @@ const QUERIES = ['bollywood hits 2024', 'trending india', 'top hindi songs', 'ar
  * subtitle format from JioSaavn is typically "Artist · Album".
  */
 function itemToSong(item: NonNullable<SearchResponseData['songs']>[0]): Song {
-  const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
-  const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
-  const albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
+  let artists: { id: string; name: string; role: string }[] = [];
+  let albumName: string | undefined;
+
+  if (item.provider === 'youtube') {
+    artists = (item.subtitle || 'YouTube Music')
+      .split(',')
+      .map((name) => ({ id: '', name: name.trim(), role: 'primary' }))
+      .filter((a) => a.name.length > 0);
+    albumName = item.extra?.album;
+  } else {
+    const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
+    const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+    artists = [{ id: '', name: artistName, role: 'primary' }];
+    albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
+  }
+
   return {
     id: item.id,
     provider: item.provider,
@@ -29,9 +42,11 @@ function itemToSong(item: NonNullable<SearchResponseData['songs']>[0]): Song {
     type: 'song',
     title: item.title,
     subtitle: item.subtitle,
-    artists: [{ id: '', name: artistName, role: 'primary' }],
+    artists: artists.length > 0 ? artists : [{ id: '', name: 'Artist', role: 'primary' }],
     album: albumName,
+    duration_ms: item.extra?.duration_ms,
     artwork_url: item.artwork_url,
+    is_explicit: Boolean(item.extra?.is_explicit),
     has_media: true,
   };
 }
@@ -53,7 +68,7 @@ export default function HomePage() {
       const r = await search(q, 20, 1, true, signal);
       if (!signal?.aborted) setData(r);
     } catch (e: unknown) {
-      if ((e as Error)?.name === 'AbortError') return;
+      if ((e as Error)?.name !== 'AbortError') return;
       setError('Couldn\'t load content. Make sure the SWAY backend is running at http://localhost:8000');
     } finally {
       if (!signal?.aborted) setLoading(false);
@@ -72,14 +87,17 @@ export default function HomePage() {
     </div>
   );
 
-  // Prefer enriched_songs (full Song objects) over raw search results
-  const songObjects: Song[] = data?.enriched_songs?.length
-    ? data.enriched_songs
-    : (data?.songs ?? []).map(itemToSong);
+  const songs = data?.songs ?? [];
+  const enrichedMap = new Map<string, Song>();
+  data?.enriched_songs?.forEach((s) => {
+    if (s.id) enrichedMap.set(s.id, s);
+    if (s.provider_id) enrichedMap.set(s.provider_id, s);
+  });
+  const songObjects: Song[] = songs.map((s) => enrichedMap.get(s.id) || enrichedMap.get(s.provider_id) || itemToSong(s));
 
   const albums = data?.albums ?? [];
   const artists = data?.artists ?? [];
-  const featured = data?.enriched_songs?.[0] ?? (data?.songs?.[0] ? itemToSong(data.songs[0]) : null);
+  const featured = songObjects[0] ?? null;
 
   return (
     <div className="px-6 py-10 max-w-7xl mx-auto space-y-14">

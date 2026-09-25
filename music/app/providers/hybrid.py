@@ -11,13 +11,16 @@ Seamlessly handles:
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
+import re
 from typing import Optional
 
 from app.core.errors import ProviderError, ProviderNotFound
 from app.models import (
     Album,
     Artist,
+    ArtistRef,
     Lyrics,
     MediaInfo,
     Playlist,
@@ -31,19 +34,167 @@ from app.providers.youtube.provider import YouTubeProvider
 
 logger = logging.getLogger(__name__)
 
-# Keywords / artists known to be restricted, delisted, or sparse on JioSaavn
-_RESTRICTED_KEYWORDS = (
-    "atif",
-    "aslam",
-    "rahat",
-    "nusrat",
-    "coke studio",
-    "chahiye",
-    "chaiye",
-    "ali zafar",
-    "pakistani",
-    "qawwali",
-)
+
+def _clean_str(s: str) -> str:
+    # Remove metadata in brackets like (From "Film"), [Official], etc.
+    s = re.sub(r"[\(\[\{].*?[\)\]\}]", "", s)
+    return re.sub(r"[^\w\s]", " ", s.lower()).strip()
+
+
+def _score_relevance(query: str, item: SearchItem, source_rank: int) -> float:
+    q = query.lower().strip()
+    q_clean = _clean_str(query)
+    title = item.title.lower().strip()
+    title_clean = _clean_str(item.title)
+    subtitle = (item.subtitle or "").lower().strip()
+    sub_clean = _clean_str(subtitle)
+    full_clean = f"{title_clean} {sub_clean}"
+
+    score = 0.0
+
+    # 1. Title phrase matches
+    if q_clean and q_clean == title_clean:
+        score += 120.0
+    elif q_clean and title_clean.startswith(q_clean):
+        score += 70.0
+    elif q_clean and q_clean in title_clean:
+        score += 50.0
+    elif q_clean and q_clean in full_clean:
+        score += 35.0
+    else:
+        ratio = difflib.SequenceMatcher(None, q_clean or q, title_clean or title).ratio()
+        if ratio > 0.70:
+            score += ratio * 80.0
+
+    # 2. Token-level matching (exact or fuzzy)
+    q_tokens = [t for t in q_clean.split() if len(t) > 1]
+    title_tokens = [t for t in title_clean.split() if len(t) > 1]
+    sub_tokens = [t for t in sub_clean.split() if len(t) > 1]
+
+    if q_tokens:
+        matched = 0
+        for qt in q_tokens:
+            if any(qt == tt for tt in title_tokens):
+                score += 30.0
+                matched += 1
+            elif any(qt == st for st in sub_tokens):
+                score += 20.0
+                matched += 1
+            else:
+                best_t = max([difflib.SequenceMatcher(None, qt, tt).ratio() for tt in title_tokens] or [0.0])
+                best_s = max([difflib.SequenceMatcher(None, qt, st).ratio() for st in sub_tokens] or [0.0])
+                best = max(best_t, best_s)
+                if best >= 0.78:
+                    score += best * 25.0
+                    matched += 1
+
+        if matched == len(q_tokens):
+            score += 40.0
+
+    # 3. Provider source rank preference (decay with position)
+    score += max(0.0, 15.0 - (source_rank * 1.2))
+
+    return score
+
+
+def _norm_info(item: SearchItem) -> tuple[str, set[str]]:
+    clean_t = _clean_str(item.title)
+    sub = (item.subtitle or "").lower()
+    a_tokens = set(re.findall(r"\w+", sub))
+    return clean_t, a_tokens
+
+
+def _is_duplicate(t1: str, a1: set[str], t2: str, a2: set[str]) -> bool:
+    if not t1 or not t2:
+        return False
+    ratio = difflib.SequenceMatcher(None, t1, t2).ratio()
+    if t1 == t2 or ratio >= 0.88:
+        if a1 and a2:
+            return any(len(tok) > 2 for tok in a1.intersection(a2))
+        return True
+    return False
+
+
+def _rank_and_merge(
+    query: str,
+    saavn_songs: list[SearchItem],
+    yt_songs: list[SearchItem],
+    n: int,
+) -> list[SearchItem]:
+    scored_candidates: list[tuple[float, SearchItem]] = []
+    for i, item in enumerate(saavn_songs):
+        scored_candidates.append((_score_relevance(query, item, i), item))
+    for j, item in enumerate(yt_songs):
+        scored_candidates.append((_score_relevance(query, item, j), item))
+
+    # Sort descending by score
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+
+    # Deduplicate matching tracks
+    merged: list[SearchItem] = []
+    seen: list[tuple[str, set[str], SearchItem]] = []
+    for score, item in scored_candidates:
+        t, a = _norm_info(item)
+        dup = False
+        for st, sa, sitem in seen:
+            if _is_duplicate(t, a, st, sa):
+                dup = True
+                break
+        if not dup:
+            seen.append((t, a, item))
+            merged.append(item)
+            if len(merged) >= n:
+                break
+
+    return merged
+
+
+def _search_item_to_song(item: SearchItem) -> Song:
+    raw_artists = (item.subtitle or "YouTube Music").split(",")
+    artists = [
+        ArtistRef(
+            id=f"youtube:artist:{a.strip().lower().replace(' ', '_')}",
+            provider="youtube",
+            provider_id=a.strip().lower().replace(" ", "_"),
+            name=a.strip(),
+            role="primary",
+        )
+        for a in raw_artists
+        if a.strip()
+    ]
+    if not artists:
+        artists = [
+            ArtistRef(
+                id="youtube:artist:unknown",
+                provider="youtube",
+                provider_id="unknown",
+                name="YouTube Music",
+                role="primary",
+            )
+        ]
+    extra = item.extra or {}
+    return Song(
+        id=item.id,
+        provider="youtube",
+        provider_id=item.provider_id,
+        title=item.title,
+        artists=artists,
+        featured_artists=[],
+        album=extra.get("album") or "YouTube Music",
+        album_id=None,
+        duration_ms=extra.get("duration_ms"),
+        artwork_url=item.artwork_url,
+        language=None,
+        year=None,
+        release_date=None,
+        label="YouTube Music",
+        copyright_text=None,
+        has_lyrics=False,
+        lyrics_id=None,
+        has_media=True,
+        is_explicit=bool(extra.get("is_explicit", False)),
+        perma_url=item.perma_url,
+    )
 
 
 class HybridMusicProvider(MusicProvider):
@@ -71,44 +222,59 @@ class HybridMusicProvider(MusicProvider):
         page: int = 1,
         enrich: bool = False,
     ) -> SearchResults:
-        q_lower = query.lower()
-        should_query_youtube = any(kw in q_lower for kw in _RESTRICTED_KEYWORDS)
+        # Run Saavn and YouTube searches concurrently in parallel
+        saavn_task = self.saavn.search(query, n=n, page=page, enrich=enrich)
+        yt_task = self.youtube.search(query, n=min(n, 12), page=page)
 
-        # 1. Run Saavn search
-        try:
-            saavn_results = await self.saavn.search(query, n=n, page=page, enrich=enrich)
-        except Exception as exc:
-            logger.warning("Saavn search failed for query %r: %s", query, exc)
+        saavn_res, yt_res = await asyncio.gather(saavn_task, yt_task, return_exceptions=True)
+
+        if isinstance(saavn_res, Exception):
+            logger.warning("Saavn search failed for query %r: %s", query, saavn_res)
             saavn_results = SearchResults(
                 query=query, songs=[], albums=[], artists=[], playlists=[],
                 total_songs=0, total_albums=0, total_artists=0, total_playlists=0,
             )
+        else:
+            saavn_results = saavn_res
 
-        # If Saavn results are sparse (< 4 songs) or query targets known restricted keywords
-        if should_query_youtube or len(saavn_results.songs) < 4:
-            try:
-                yt_results = await self.youtube.search(query, n=min(n, 10), page=page)
-                if yt_results.songs:
-                    # Blend results: prioritize YouTube songs if query matched restricted keywords
-                    existing_titles = {s.title.lower().strip() for s in saavn_results.songs}
-                    unique_yt_songs = [
-                        s for s in yt_results.songs
-                        if s.title.lower().strip() not in existing_titles or should_query_youtube
-                    ]
+        yt_songs: list[SearchItem] = []
+        if not isinstance(yt_res, Exception) and yt_res and yt_res.songs:
+            yt_songs = yt_res.songs
 
-                    if should_query_youtube:
-                        # Prepend high-relevance YouTube songs (e.g. Tu Chahiye - Atif Aslam)
-                        merged_songs = unique_yt_songs + [
-                            s for s in saavn_results.songs
-                            if s.id not in {y.id for y in unique_yt_songs}
-                        ]
-                    else:
-                        merged_songs = saavn_results.songs + unique_yt_songs
+        if yt_songs:
+            saavn_results.songs = _rank_and_merge(query, saavn_results.songs, yt_songs, n=n)
+            saavn_results.total_songs = len(saavn_results.songs)
 
-                    saavn_results.songs = merged_songs[:n]
-                    saavn_results.total_songs = len(saavn_results.songs)
-            except Exception as yt_exc:
-                logger.warning("YouTube search fallback failed for query %r: %s", query, yt_exc)
+        # Keep enriched_songs in sync when enrich is requested
+        if enrich and saavn_results.songs:
+            existing_enriched = {s.id: s for s in (saavn_results.enriched_songs or [])}
+            new_enriched: list[Song] = []
+            for s_item in saavn_results.songs:
+                if s_item.id in existing_enriched:
+                    new_enriched.append(existing_enriched[s_item.id])
+                elif s_item.provider == "youtube":
+                    new_enriched.append(_search_item_to_song(s_item))
+                else:
+                    new_enriched.append(
+                        Song(
+                            id=s_item.id,
+                            provider=s_item.provider,
+                            provider_id=s_item.provider_id,
+                            title=s_item.title,
+                            artists=[
+                                ArtistRef(
+                                    id="",
+                                    provider=s_item.provider,
+                                    provider_id="",
+                                    name=s_item.subtitle or "Artist",
+                                    role="primary",
+                                )
+                            ],
+                            artwork_url=s_item.artwork_url,
+                            has_media=True,
+                        )
+                    )
+            saavn_results.enriched_songs = new_enriched
 
         return saavn_results
 
