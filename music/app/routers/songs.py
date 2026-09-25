@@ -29,11 +29,11 @@ def _validate_id(song_id: str) -> str:
 
 async def _resolve_or_search_song(provider, song_id: str):
     sid = song_id.strip()
-    if ":" in sid:
-        sid = sid.split(":", 1)[1]
+    is_yt = sid.startswith("youtube:") or sid.startswith("yt:")
     validated = _validate_id(sid)
+    target_id = f"youtube:{validated}" if is_yt else validated
     try:
-        return await provider.get_song(validated)
+        return await provider.get_song(target_id)
     except ProviderNotFound:
         # Fallback: search query if not found by exact ID
         clean_query = sid.replace("_", " ").replace("-", " ").strip()
@@ -41,7 +41,7 @@ async def _resolve_or_search_song(provider, song_id: str):
             try:
                 res = await provider.search(clean_query, n=1)
                 if res.songs:
-                    return await provider.get_song(res.songs[0].provider_id)
+                    return await provider.get_song(res.songs[0].id)
             except Exception:
                 pass
         raise
@@ -103,7 +103,20 @@ async def get_media(request: Request, song_id: str):
     Media URLs have short TTL — do not cache on the client side for long.
     """
     provider = request.app.state.provider
-    song = await _resolve_or_search_song(provider, song_id)
+    sid = song_id.strip()
+    if sid.startswith("youtube:") or sid.startswith("yt:"):
+        vid = _validate_id(sid)
+        song = Song(
+            id=f"youtube:{vid}",
+            provider="youtube",
+            provider_id=vid,
+            title="",
+            artists=[],
+            featured_artists=[],
+            has_media=True,
+        )
+    else:
+        song = await _resolve_or_search_song(provider, song_id)
     media = await provider.resolve_media(song)
     return APIResponse(
         success=True,

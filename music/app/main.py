@@ -31,6 +31,8 @@ from app.core.logging_config import (
 )
 from app.providers.saavn.client import SaavnClient
 from app.providers.saavn.provider import SaavnProvider
+from app.providers.youtube.provider import YouTubeProvider
+from app.providers.hybrid import HybridMusicProvider
 from app.routers import albums, artists, health, lyrics, playlists, recommendations, search, songs
 
 logger = logging.getLogger(__name__)
@@ -69,11 +71,16 @@ async def lifespan(app: FastAPI):
         circuit_breaker=circuit_breaker,
         limiter=limiter,
     )
-    provider = SaavnProvider(
+    saavn_provider = SaavnProvider(
         client=saavn_client,
         cache=cache,
         limiter=limiter,
         circuit_breaker=circuit_breaker,
+    )
+    youtube_provider = YouTubeProvider(cache=cache)
+    provider = HybridMusicProvider(
+        saavn_provider=saavn_provider,
+        youtube_provider=youtube_provider,
     )
 
     # Store on app.state

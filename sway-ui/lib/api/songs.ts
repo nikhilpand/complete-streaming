@@ -6,19 +6,22 @@ import type { Song, MediaResolution } from './types';
  * NOT the compound id (e.g. "saavn:yXCLyL-9").
  * Strip the "provider:" prefix if present.
  */
-function rawId(id: string): string {
+function songApiPath(id: string): string {
+  if (id.startsWith('youtube:') || id.startsWith('yt:')) {
+    return id;
+  }
   const colon = id.indexOf(':');
   return colon !== -1 ? id.slice(colon + 1) : id;
 }
 
 export async function getSong(id: string, signal?: AbortSignal) {
-  return fetchApi<Song>(`/songs/${rawId(id)}`, { signal });
+  return fetchApi<Song>(`/songs/${songApiPath(id)}`, { signal });
 }
 
 export async function resolveMedia(id: string, signal?: AbortSignal) {
-  return fetchApi<MediaResolution>(`/songs/${rawId(id)}/media`, { signal });
+  return fetchApi<MediaResolution>(`/songs/${songApiPath(id)}/media`, { signal });
 }
 
 export async function getSongLyrics(id: string, signal?: AbortSignal) {
-  return fetchApi<any>(`/songs/${rawId(id)}/lyrics`, { signal });
+  return fetchApi<any>(`/songs/${songApiPath(id)}/lyrics`, { signal });
 }
