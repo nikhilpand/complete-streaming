@@ -28,6 +28,7 @@ if str(taste_engine_dir) not in sys.path:
     sys.path.insert(0, str(taste_engine_dir))
 
 from sway_taste_engine.engine import RecommendationEngine
+from sway_taste_engine.metadata import extract_track_features, clean_track_id
 from sway_taste_engine.models import (
     EventType,
     FeedType,
@@ -100,50 +101,11 @@ def clean_track_id(tid: str) -> str:
 
 
 def song_to_engine_track(song: Any) -> Track:
-    """Convert a JioSaavn Song model into a sway_taste_engine Track model."""
-    sid = getattr(song, "provider_id", None) or getattr(song, "id", "")
-    if ":" in sid:
-        sid = sid.split(":", 1)[1]
-
-    artist_name = "Unknown Artist"
-    artist_id = "unknown"
-    if hasattr(song, "artists") and song.artists:
-        artist_name = ", ".join(a.name for a in song.artists if hasattr(a, "name"))
-        artist_id = song.artists[0].id if hasattr(song.artists[0], "id") else "unknown"
-    elif hasattr(song, "subtitle") and song.subtitle:
-        artist_name = song.subtitle
-
-    album_name = getattr(song, "album", None) or "Single"
-    artwork = getattr(song, "artwork_url", "") or ""
-    if sid and artwork:
-        _artwork_cache[sid] = artwork
-
-    # Infer genres/moods from language or title if available
-    genres = ["indian", "bollywood"]
-    moods = ["melodic"]
-    title_lower = (getattr(song, "title", "") or "").lower()
-    if any(w in title_lower for w in ["bhajan", "aarti", "shiv", "hanuman", "ram", "krishna"]):
-        genres = ["devotional", "spiritual"]
-        moods = ["peaceful", "spiritual"]
-    elif any(w in title_lower for w in ["party", "dance", "remix", "beat"]):
-        genres = ["dance", "pop"]
-        moods = ["energetic", "party"]
-    elif any(w in title_lower for w in ["sad", "judaai", "dard", "roya"]):
-        moods = ["melancholic", "emotional"]
-
-    return Track(
-        id=sid,
-        title=getattr(song, "title", "Track"),
-        artist_id=artist_id,
-        artist_name=artist_name,
-        album_id=album_name.lower().replace(" ", "_"),
-        album_name=album_name,
-        genres=genres,
-        moods=moods,
-        energy=0.7,
-        bpm=105.0,
-        popularity=0.9,
-    )
+    """Convert a JioSaavn Song model into a sway_taste_engine Track model with factual features."""
+    track = extract_track_features(song)
+    if track.id and track.artwork_url:
+        _artwork_cache[track.id] = track.artwork_url
+    return track
 
 
 class EventIn(BaseModel):

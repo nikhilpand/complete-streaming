@@ -26,6 +26,7 @@ from .storage import (
     SQLiteTasteStore,
     InMemoryStore,
 )
+from .metadata import extract_track_features, clean_track_id
 from .normalizer import EventNormalizer
 from .profile import TasteProfileBuilder
 from .engine import RecommendationEngine
@@ -53,6 +54,8 @@ __all__ = [
     "TasteStore",
     "SQLiteTasteStore",
     "InMemoryStore",
+    "extract_track_features",
+    "clean_track_id",
     "EventNormalizer",
     "TasteProfileBuilder",
     "RecommendationEngine",
