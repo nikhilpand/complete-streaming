@@ -1,0 +1,61 @@
+{
+  "songs": {
+    "data": [
+      {
+        "id": "search_song1",
+        "title": "Tum Hi Ho",
+        "type": "song",
+        "image": "https://c.saavncdn.com/123/50x50.jpg",
+        "perma_url": "https://www.jiosaavn.com/song/tum-hi-ho/I9DTxvJNRQA_",
+        "description": "Arijit Singh"
+      },
+      {
+        "id": "search_song2",
+        "title": "Tera Ban Jaunga",
+        "type": "song",
+        "image": "https://c.saavncdn.com/456/50x50.jpg",
+        "perma_url": "https://www.jiosaavn.com/song/tera-ban/xyz",
+        "description": "Akhil Sachdeva"
+      }
+    ],
+    "position": 1
+  },
+  "albums": {
+    "data": [
+      {
+        "id": "album_search1",
+        "title": "Aashiqui 2",
+        "type": "album",
+        "image": "https://c.saavncdn.com/789/50x50.jpg",
+        "perma_url": "https://www.jiosaavn.com/album/aashiqui-2/abc",
+        "description": "Various Artists"
+      }
+    ],
+    "position": 2
+  },
+  "artists": {
+    "data": [
+      {
+        "id": "artist_search1",
+        "name": "Arijit Singh",
+        "type": "artist",
+        "image": "https://c.saavncdn.com/art/50x50.jpg",
+        "perma_url": "https://www.jiosaavn.com/artist/arijit-singh/LlRWpHzy3Hk_"
+      }
+    ],
+    "position": 3
+  },
+  "playlists": {
+    "data": [
+      {
+        "id": "playlist_search1",
+        "title": "Best of Arijit",
+        "type": "playlist",
+        "image": "https://c.saavncdn.com/pl/50x50.jpg",
+        "perma_url": "https://www.jiosaavn.com/featured/best-of-arijit/abc",
+        "description": "JioSaavn"
+      }
+    ],
+    "position": 4
+  }
+}

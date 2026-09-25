@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[project]
+name="sway-taste-engine"
+version="0.1.0"
+description="Provider-agnostic recommendation engine for SWAY"
+requires-python=">=3.11"
+dependencies=["pydantic>=2.7,<3","fastapi>=0.115,<1","uvicorn>=0.30,<1"]
+[project.optional-dependencies]
+test=["pytest>=8,<9"]
+[tool.pytest.ini_options]
+addopts="-q"
+pythonpath=["."]
+[tool.setuptools.packages.find]
+include=["sway_taste_engine*"]

@@ -1,0 +1,55 @@
+{
+  "id": "test123",
+  "song": "Tum Hi Ho",
+  "album": "Aashiqui 2",
+  "albumid": "album456",
+  "year": "2013",
+  "duration": "262",
+  "language": "hindi",
+  "has_lyrics": "true",
+  "lyrics_snippet": "Tere liye hi jiya main...",
+  "image": "https://c.saavncdn.com/123/50x50.jpg",
+  "perma_url": "https://www.jiosaavn.com/song/tum-hi-ho/I9DTxvJNRQA_",
+  "encrypted_media_url": "dGVzdF9lbmNyeXB0ZWRfdXJs",
+  "media_url": "",
+  "type": "song",
+  "singers": "Arijit Singh",
+  "music": "Mithoon",
+  "label": "T-Series",
+  "copyright_text": "(c) 2013 T-Series",
+  "320kbps": "true",
+  "more_info": {
+    "lyrics_id": "lyrics789",
+    "music_id": "music001",
+    "song_id": "test123",
+    "album_id": "album456",
+    "label_id": "label001",
+    "artistMap": {
+      "primary_artists": [
+        {
+          "id": "artist100",
+          "name": "Arijit Singh",
+          "role": "singer",
+          "image": "https://c.saavncdn.com/artists/50x50.jpg",
+          "type": "artist",
+          "perma_url": "https://www.jiosaavn.com/artist/arijit-singh/LlRWpHzy3Hk_"
+        }
+      ],
+      "featured_artists": [
+        {
+          "id": "artist200",
+          "name": "Palak Muchhal",
+          "role": "singer",
+          "image": "https://c.saavncdn.com/artists2/50x50.jpg",
+          "type": "artist",
+          "perma_url": "https://www.jiosaavn.com/artist/palak-muchhal/abc123"
+        }
+      ],
+      "artists": []
+    },
+    "release_date": "2013-04-16",
+    "has_lyrics": "true",
+    "lyrics_snippet": "Tere liye hi jiya main...",
+    "language": "hindi"
+  }
+}

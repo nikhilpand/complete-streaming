@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SWAY • Saavn Provider Test Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              400: '#4ade80',
+              500: '#22c55e',
+              600: '#16a34a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .glass { background: rgba(18, 24, 38, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .glass-card { background: rgba(26, 34, 52, 0.5); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.05); }
+    .glass-card:hover { border-color: rgba(74, 222, 128, 0.3); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-[#0b0f19] text-slate-100 min-h-screen flex flex-col pb-32">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-40 glass border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-green-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-green-500/20">
+          <svg class="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+        </div>
+        <div>
+          <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">SWAY</span>
+          <span class="text-xs px-2 py-0.5 ml-2 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Saavn Provider</span>
+        </div>
+      </div>
+
+      <!-- Health Status Badge & Links -->
+      <div class="flex items-center space-x-4">
+        <div id="healthBadge" class="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-mono glass border border-slate-700">
+          <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="healthText" class="text-slate-300">Checking...</span>
+        </div>
+        <a href="/docs" target="_blank" class="text-xs text-slate-400 hover:text-white flex items-center space-x-1 px-2.5 py-1.5 rounded-lg hover:bg-slate-800/60 transition">
+          <span>OpenAPI Docs</span>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 w-full">
+    <div class="flex space-x-2 border-b border-slate-800 pb-3">
+      <button onclick="switchTab('search')" id="tabBtnSearch" class="px-4 py-2 rounded-lg text-sm font-semibold transition bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+        🔍 Search & Stream
+      </button>
+      <button onclick="switchTab('resolver')" id="tabBtnResolver" class="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/50">
+        🔗 Direct Link / ID Resolver
+      </button>
+      <button onclick="switchTab('diagnostics')" id="tabBtnDiagnostics" class="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/50">
+        ⚡ Metrics & Circuit Breaker
+      </button>
+    </div>
+  </div>
+
+  <!-- TAB 1: Search & Stream -->
+  <main id="tabSearch" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 w-full">
+    <!-- Search Bar -->
+    <div class="glass p-4 rounded-2xl shadow-xl flex flex-col md:flex-row gap-3 items-center">
+      <div class="relative flex-1 w-full">
+        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        </div>
+        <input 
+          type="text" 
+          id="searchInput" 
+          placeholder="Search songs, albums, artists (e.g. Tum Hi Ho, Arijit Singh, Rockstar)..." 
+          class="w-full pl-11 pr-4 py-3 bg-slate-900/80 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-sm text-white placeholder-slate-500 transition"
+          onkeydown="if(event.key==='Enter') executeSearch()"
+          value="Tum Hi Ho"
+        >
+      </div>
+
+      <div class="flex items-center space-x-3 w-full md:w-auto justify-between">
+        <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none bg-slate-800/40 px-3 py-3 rounded-xl border border-slate-700">
+          <input type="checkbox" id="enrichToggle" class="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0">
+          <span>Enrich Top Songs</span>
+        </label>
+
+        <button 
+          onclick="executeSearch()" 
+          id="searchBtn"
+          class="px-6 py-3 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-black font-bold text-sm rounded-xl transition shadow-lg shadow-emerald-500/20 flex items-center space-x-2 shrink-0"
+        >
+          <span>Search</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="searchLoading" class="hidden text-center py-16">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-700 border-t-emerald-500"></div>
+      <p class="text-xs text-slate-400 mt-3 font-mono">Querying Saavn Provider Engine...</p>
+    </div>
+
+    <!-- Search Results Container -->
+    <div id="searchResults" class="mt-8 space-y-8">
+      <!-- Songs section -->
+      <section id="songsSection" class="hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold flex items-center space-x-2 text-slate-200">
+            <span>🎵 Songs</span>
+            <span id="songsCount" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400"></span>
+          </h2>
+        </div>
+        <div id="songsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </section>
+
+      <!-- Albums section -->
+      <section id="albumsSection" class="hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold flex items-center space-x-2 text-slate-200">
+            <span>💿 Albums</span>
+            <span id="albumsCount" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400"></span>
+          </h2>
+        </div>
+        <div id="albumsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
+      </section>
+
+      <!-- Artists section -->
+      <section id="artistsSection" class="hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold flex items-center space-x-2 text-slate-200">
+            <span>🎙️ Artists</span>
+            <span id="artistsCount" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400"></span>
+          </h2>
+        </div>
+        <div id="artistsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- TAB 2: Direct Resolver -->
+  <main id="tabResolver" class="hidden max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 w-full">
+    <div class="glass p-6 rounded-2xl">
+      <h2 class="text-lg font-bold mb-2">Direct Link or ID Resolver</h2>
+      <p class="text-xs text-slate-400 mb-6">Test the SSRF-safe URL parser or resolve raw provider identifiers.</p>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-mono text-slate-300 mb-1.5">JioSaavn Share URL or Resource ID</label>
+          <input 
+            type="text" 
+            id="resolverInput" 
+            placeholder="https://www.jiosaavn.com/song/tum-hi-ho/I9DTxvJNRQA_  or  aRZbUYD7"
+            class="w-full px-4 py-3 bg-slate-900 rounded-xl border border-slate-700 text-sm font-mono text-white focus:outline-none focus:border-emerald-500"
+          >
+        </div>
+
+        <div class="flex space-x-3">
+          <button onclick="resolveDirect('song')" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg transition border border-slate-700">
+            Resolve Song
+          </button>
+          <button onclick="resolveDirect('album')" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg transition border border-slate-700">
+            Resolve Album
+          </button>
+          <button onclick="resolveDirect('playlist')" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg transition border border-slate-700">
+            Resolve Playlist
+          </button>
+        </div>
+      </div>
+
+      <!-- Direct Result Viewer -->
+      <div id="resolverOutput" class="mt-6 hidden">
+        <h3 class="text-xs font-mono text-slate-400 mb-2">Parsed Output:</h3>
+        <pre id="resolverJson" class="p-4 bg-slate-950 rounded-xl text-xs font-mono text-emerald-400 overflow-x-auto max-h-96 border border-slate-800"></pre>
+      </div>
+    </div>
+  </main>
+
+  <!-- TAB 3: Diagnostics & Metrics -->
+  <main id="tabDiagnostics" class="hidden max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 w-full">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="glass p-5 rounded-2xl">
+        <span class="text-xs font-mono text-slate-400">CIRCUIT BREAKER</span>
+        <div id="cbState" class="text-2xl font-bold font-mono text-emerald-400 mt-2">CLOSED</div>
+        <div class="text-xs text-slate-400 mt-2 space-y-1">
+          <div>Failures: <span id="cbFailures" class="font-mono text-white">0</span> / 5</div>
+          <div>Success Threshold: <span class="font-mono text-white">2</span></div>
+        </div>
+      </div>
+
+      <div class="glass p-5 rounded-2xl">
+        <span class="text-xs font-mono text-slate-400">IN-MEMORY CACHE</span>
+        <div id="cacheSize" class="text-2xl font-bold font-mono text-cyan-400 mt-2">0</div>
+        <p class="text-xs text-slate-400 mt-2">Cached active keys (Songs, Albums, Search with SWR)</p>
+      </div>
+
+      <div class="glass p-5 rounded-2xl">
+        <span class="text-xs font-mono text-slate-400">CONCURRENCY LIMITER</span>
+        <div class="text-2xl font-bold font-mono text-purple-400 mt-2">5 Max</div>
+        <p class="text-xs text-slate-400 mt-2">Active Semaphore bounds (zero socket churn)</p>
+      </div>
+    </div>
+
+    <div class="glass p-6 rounded-2xl mt-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-bold font-mono">Live Health & Ready Payload</h3>
+        <button onclick="fetchDiagnostics()" class="text-xs px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg font-mono">Refresh</button>
+      </div>
+      <pre id="diagnosticsJson" class="p-4 bg-slate-950 rounded-xl text-xs font-mono text-slate-300 overflow-x-auto max-h-96 border border-slate-800"></pre>
+    </div>
+  </main>
+
+  <!-- Persistent Player Bar -->
+  <footer id="playerBar" class="fixed bottom-0 inset-x-0 z-50 glass border-t border-slate-800/80 p-3 sm:p-4 transition-transform duration-300 translate-y-full">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+      <!-- Song info -->
+      <div class="flex items-center space-x-3 w-full sm:w-1/3">
+        <img id="playerArtwork" src="" class="h-12 w-12 rounded-lg object-cover bg-slate-800 shrink-0 border border-slate-700">
+        <div class="min-w-0">
+          <div id="playerTitle" class="text-sm font-bold text-white truncate">Select a song</div>
+          <div id="playerArtist" class="text-xs text-slate-400 truncate">No artist</div>
+        </div>
+      </div>
+
+      <!-- Audio Element & Controls -->
+      <div class="w-full sm:w-1/3 flex flex-col items-center">
+        <audio id="audioElement" controls class="w-full h-8 opacity-90 brightness-95"></audio>
+      </div>
+
+      <!-- Quality Selector & Actions -->
+      <div class="flex items-center justify-end space-x-3 w-full sm:w-1/3">
+        <div class="flex items-center space-x-1.5 text-xs text-slate-400">
+          <span class="font-mono">Quality:</span>
+          <select id="qualitySelect" onchange="changeQuality()" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-mono text-emerald-400 focus:outline-none">
+            <option value="320kbps">320 kbps</option>
+            <option value="160kbps">160 kbps</option>
+            <option value="96kbps">96 kbps</option>
+          </select>
+        </div>
+
+        <button onclick="openLyrics()" id="lyricsBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg text-slate-300 transition flex items-center space-x-1 border border-slate-700">
+          <span>📜</span>
+          <span>Lyrics</span>
+        </button>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Lyrics Modal -->
+  <div id="lyricsModal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass max-w-lg w-full rounded-2xl p-6 border border-slate-700 max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+        <div>
+          <h3 id="lyricsTitle" class="text-base font-bold text-white">Song Lyrics</h3>
+          <p id="lyricsSnippet" class="text-xs text-slate-400"></p>
+        </div>
+        <button onclick="closeLyrics()" class="text-slate-400 hover:text-white p-1 rounded-lg">✕</button>
+      </div>
+      <div id="lyricsContent" class="overflow-y-auto text-sm leading-relaxed text-slate-300 whitespace-pre-line font-serif pr-2"></div>
+    </div>
+  </div>
+
+  <!-- JSON Inspector Modal -->
+  <div id="jsonModal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass max-w-2xl w-full rounded-2xl p-6 border border-slate-700 max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+        <h3 id="jsonModalTitle" class="text-sm font-mono text-emerald-400">Inspect Canonical Payload</h3>
+        <button onclick="closeJsonModal()" class="text-slate-400 hover:text-white p-1 rounded-lg">✕</button>
+      </div>
+      <pre id="jsonModalBody" class="overflow-y-auto text-xs font-mono text-slate-300 bg-slate-950 p-4 rounded-xl border border-slate-800"></pre>
+    </div>
+  </div>
+
+  <script>
+    let currentStreams = [];
+    let currentSongData = null;
+
+    // Check health on load
+    async function checkHealth() {
+      try {
+        const res = await fetch('/health/ready');
+        const data = await res.json();
+        const badge = document.getElementById('healthBadge');
+        const text = document.getElementById('healthText');
+        badge.classList.remove('hidden');
+        if (data.status === 'ready') {
+          text.textContent = `Ready • CB: ${data.provider.circuit_breaker.state} • Cache: ${data.provider.cache_size}`;
+        } else {
+          text.textContent = `Degraded • ${data.status}`;
+        }
+      } catch (e) {
+        console.warn('Health check failed', e);
+      }
+    }
+    setInterval(checkHealth, 5000);
+    checkHealth();
+
+    // Tab switching
+    function switchTab(tab) {
+      ['search', 'resolver', 'diagnostics'].forEach(t => {
+        const page = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
+        const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (t === tab) {
+          page.classList.remove('hidden');
+          btn.className = "px-4 py-2 rounded-lg text-sm font-semibold transition bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        } else {
+          page.classList.add('hidden');
+          btn.className = "px-4 py-2 rounded-lg text-sm font-medium transition text-slate-400 hover:text-white hover:bg-slate-800/50";
+        }
+      });
+      if (tab === 'diagnostics') fetchDiagnostics();
+    }
+
+    // Search Execution
+    async function executeSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      if (!q) return;
+
+      const enrich = document.getElementById('enrichToggle').checked;
+      const loader = document.getElementById('searchLoading');
+      const results = document.getElementById('searchResults');
+
+      loader.classList.remove('hidden');
+      results.classList.add('opacity-50');
+
+      try {
+        const res = await fetch(`/api/v1/search?q=${encodeURIComponent(q)}&enrich=${enrich}`);
+        const json = await res.json();
+        if (json.success && json.data) {
+          renderSearchResults(json.data);
+        }
+      } catch (err) {
+        alert('Search request failed: ' + err);
+      } finally {
+        loader.classList.add('hidden');
+        results.classList.remove('opacity-50');
+      }
+    }
+
+    function renderSearchResults(data) {
+      // 1. Songs
+      const songsGrid = document.getElementById('songsGrid');
+      const songsSection = document.getElementById('songsSection');
+      songsGrid.innerHTML = '';
+      if (data.songs && data.songs.length > 0) {
+        songsSection.classList.remove('hidden');
+        document.getElementById('songsCount').textContent = data.songs.length;
+        data.songs.forEach(s => {
+          const card = document.createElement('div');
+          card.className = "glass-card p-3.5 rounded-xl flex items-center justify-between space-x-3 transition hover:scale-[1.01]";
+          card.innerHTML = `
+            <div class="flex items-center space-x-3 min-w-0">
+              <img src="${s.artwork_url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'}" class="h-12 w-12 rounded-lg object-cover bg-slate-800 shrink-0 border border-slate-700">
+              <div class="min-w-0">
+                <div class="text-sm font-bold text-white truncate">${s.title}</div>
+                <div class="text-xs text-slate-400 truncate">${s.subtitle || 'Song'}</div>
+                <span class="text-[10px] font-mono text-emerald-400/80">${s.provider_id}</span>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2 shrink-0">
+              <button onclick="inspectJson('song', '${s.provider_id}')" class="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs text-slate-300 font-mono transition" title="Inspect Canonical JSON">
+                {}
+              </button>
+              <button onclick="playSong('${s.provider_id}')" class="p-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition shadow-md shadow-emerald-500/20">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+            </div>
+          `;
+          songsGrid.appendChild(card);
+        });
+      } else {
+        songsSection.classList.add('hidden');
+      }
+
+      // 2. Albums
+      const albumsGrid = document.getElementById('albumsGrid');
+      const albumsSection = document.getElementById('albumsSection');
+      albumsGrid.innerHTML = '';
+      if (data.albums && data.albums.length > 0) {
+        albumsSection.classList.remove('hidden');
+        document.getElementById('albumsCount').textContent = data.albums.length;
+        data.albums.forEach(a => {
+          const card = document.createElement('div');
+          card.className = "glass-card p-3 rounded-xl flex flex-col space-y-2 cursor-pointer transition hover:scale-[1.02]";
+          card.onclick = () => inspectJson('album', a.provider_id);
+          card.innerHTML = `
+            <img src="${a.artwork_url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200'}" class="w-full aspect-square rounded-lg object-cover bg-slate-800 border border-slate-700">
+            <div class="text-xs font-bold text-white truncate">${a.title}</div>
+            <div class="text-[11px] text-slate-400 truncate">${a.subtitle || 'Album'}</div>
+          `;
+          albumsGrid.appendChild(card);
+        });
+      } else {
+        albumsSection.classList.add('hidden');
+      }
+
+      // 3. Artists
+      const artistsGrid = document.getElementById('artistsGrid');
+      const artistsSection = document.getElementById('artistsSection');
+      artistsGrid.innerHTML = '';
+      if (data.artists && data.artists.length > 0) {
+        artistsSection.classList.remove('hidden');
+        document.getElementById('artistsCount').textContent = data.artists.length;
+        data.artists.forEach(art => {
+          const card = document.createElement('div');
+          card.className = "glass-card p-3 rounded-xl flex flex-col items-center text-center space-y-2 cursor-pointer transition hover:scale-[1.02]";
+          card.onclick = () => inspectJson('artist', art.provider_id);
+          card.innerHTML = `
+            <img src="${art.artwork_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'}" class="w-20 h-20 rounded-full object-cover bg-slate-800 border border-slate-700">
+            <div class="text-xs font-bold text-white truncate w-full">${art.title}</div>
+            <div class="text-[10px] text-slate-400 font-mono">Artist</div>
+          `;
+          artistsGrid.appendChild(card);
+        });
+      } else {
+        artistsSection.classList.add('hidden');
+      }
+    }
+
+    // Play Song Flow
+    async function playSong(providerId) {
+      try {
+        // 1. Fetch canonical metadata
+        const songRes = await fetch(`/api/v1/songs/${providerId}`);
+        const songJson = await songRes.json();
+        currentSongData = songJson.data;
+
+        // 2. Fetch media streams
+        const mediaRes = await fetch(`/api/v1/songs/${providerId}/media`);
+        const mediaJson = await mediaRes.json();
+        
+        if (!mediaJson.data || !mediaJson.data.streams || mediaJson.data.streams.length === 0) {
+          alert('No streams could be resolved for this song.');
+          return;
+        }
+
+        currentStreams = mediaJson.data.streams;
+
+        // Setup player UI
+        document.getElementById('playerArtwork').src = currentSongData.artwork_url || '';
+        document.getElementById('playerTitle').textContent = currentSongData.title;
+        document.getElementById('playerArtist').textContent = (currentSongData.artists || []).map(a => a.name).join(', ') || 'Unknown Artist';
+
+        // Populate quality select
+        const qSelect = document.getElementById('qualitySelect');
+        qSelect.innerHTML = '';
+        currentStreams.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.quality;
+          opt.textContent = `${s.quality} (${s.bitrate_kbps}k)`;
+          if (s.quality === '320kbps') opt.selected = true;
+          qSelect.appendChild(opt);
+        });
+
+        // Set audio source to highest quality
+        const topStream = currentStreams.find(s => s.quality === '320kbps') || currentStreams[currentStreams.length - 1];
+        const audio = document.getElementById('audioElement');
+        audio.src = topStream.url;
+        audio.play();
+
+        // Slide up player bar
+        document.getElementById('playerBar').classList.remove('translate-y-full');
+      } catch (err) {
+        alert('Failed to play song: ' + err);
+      }
+    }
+
+    function changeQuality() {
+      const selectedQ = document.getElementById('qualitySelect').value;
+      const stream = currentStreams.find(s => s.quality === selectedQ);
+      if (stream) {
+        const audio = document.getElementById('audioElement');
+        const currentTime = audio.currentTime;
+        audio.src = stream.url;
+        audio.currentTime = currentTime;
+        audio.play();
+      }
+    }
+
+    // Lyrics Modal
+    async function openLyrics() {
+      if (!currentSongData) return;
+      document.getElementById('lyricsModal').classList.remove('hidden');
+      document.getElementById('lyricsTitle').textContent = currentSongData.title + ' — Lyrics';
+      document.getElementById('lyricsSnippet').textContent = currentSongData.lyrics_snippet || '';
+      document.getElementById('lyricsContent').textContent = 'Loading lyrics...';
+
+      try {
+        const res = await fetch(`/api/v1/songs/${currentSongData.provider_id}/lyrics`);
+        const json = await res.json();
+        if (json.data && json.data.plain) {
+          document.getElementById('lyricsContent').textContent = json.data.plain;
+        } else {
+          document.getElementById('lyricsContent').textContent = 'Lyrics not available for this track.';
+        }
+      } catch (e) {
+        document.getElementById('lyricsContent').textContent = 'Error fetching lyrics: ' + e;
+      }
+    }
+
+    function closeLyrics() {
+      document.getElementById('lyricsModal').classList.add('hidden');
+    }
+
+    // Inspect Canonical JSON Modal
+    async function inspectJson(type, id) {
+      document.getElementById('jsonModal').classList.remove('hidden');
+      document.getElementById('jsonModalTitle').textContent = `GET /api/v1/${type}s/${id}`;
+      document.getElementById('jsonModalBody').textContent = 'Fetching canonical payload...';
+
+      try {
+        const res = await fetch(`/api/v1/${type}s/${id}`);
+        const data = await res.json();
+        document.getElementById('jsonModalBody').textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        document.getElementById('jsonModalBody').textContent = 'Error: ' + e;
+      }
+    }
+
+    function closeJsonModal() {
+      document.getElementById('jsonModal').classList.add('hidden');
+    }
+
+    // Direct resolver
+    async function resolveDirect(type) {
+      const input = document.getElementById('resolverInput').value.trim();
+      if (!input) return;
+
+      const out = document.getElementById('resolverOutput');
+      const pre = document.getElementById('resolverJson');
+      out.classList.remove('hidden');
+      pre.textContent = 'Resolving...';
+
+      const isUrl = input.startsWith('http://') || input.startsWith('https://');
+      const endpoint = isUrl 
+        ? `/api/v1/${type}s?link=${encodeURIComponent(input)}`
+        : `/api/v1/${type}s/${input}`;
+
+      try {
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        pre.textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        pre.textContent = 'Resolution failed: ' + e;
+      }
+    }
+
+    // Diagnostics
+    async function fetchDiagnostics() {
+      try {
+        const res = await fetch('/health/ready');
+        const data = await res.json();
+        document.getElementById('diagnosticsJson').textContent = JSON.stringify(data, null, 2);
+        if (data.provider && data.provider.circuit_breaker) {
+          const cb = data.provider.circuit_breaker;
+          document.getElementById('cbState').textContent = cb.state.toUpperCase();
+          document.getElementById('cbFailures').textContent = cb.failure_count;
+          document.getElementById('cacheSize').textContent = data.provider.cache_size;
+        }
+      } catch (e) {
+        document.getElementById('diagnosticsJson').textContent = 'Error loading metrics: ' + e;
+      }
+    }
+
+    // Initial search
+    executeSearch();
+  </script>
+</body>
+</html>

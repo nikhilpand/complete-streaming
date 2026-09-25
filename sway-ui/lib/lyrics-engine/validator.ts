@@ -1,0 +1,152 @@
+/**
+ * validator.ts
+ * Content Sanity Validation for Lyrics Candidates (Section 11)
+ */
+
+export interface ValidationResult {
+  isValid: boolean;
+  reason?: string;
+  sanitizedText?: string;
+}
+
+const ERROR_PATTERNS = [
+  /404\s+not\s+found/i,
+  /access\s+denied/i,
+  /lyrics\s+not\s+available/i,
+  /we\s+do\s+not\s+have\s+the\s+lyrics/i,
+  /captcha/i,
+  /rate\s+limit\s+exceeded/i,
+  /cloudflare/i,
+  /unauthorized/i,
+  /forbidden/i,
+];
+
+export function validateLyricsContent(rawContent: string, isSynced: boolean = false): ValidationResult {
+  if (!rawContent || typeof rawContent !== 'string') {
+    return { isValid: false, reason: 'Empty lyrics content' };
+  }
+
+  const trimmed = rawContent.trim();
+
+  // 1. Minimum character length
+  if (trimmed.length < 20) {
+    return { isValid: false, reason: `Too short: ${trimmed.length} chars (minimum 20)` };
+  }
+
+  // 2. Reject HTML / Script tags
+  if (/<(?:html|body|script|style|table|div|head)[\s>]/i.test(trimmed)) {
+    return { isValid: false, reason: 'HTML/Script payload detected in lyrics body' };
+  }
+
+  // 3. Reject raw JSON / XML payload
+  if (trimmed.startsWith('{') || trimmed.startsWith('<?xml') || (trimmed.startsWith('[') && !/^\[\d{1,2}:\d{2}/.test(trimmed))) {
+    return { isValid: false, reason: 'JSON or XML payload leakage' };
+  }
+
+  // 4. Reject obvious error responses
+  for (const pattern of ERROR_PATTERNS) {
+    if (pattern.test(trimmed) && trimmed.length < 300) {
+      return { isValid: false, reason: `Error page text detected: ${pattern}` };
+    }
+  }
+
+  // 5. Line count check
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 3) {
+    return { isValid: false, reason: `Insufficient lines: ${lines.length} (minimum 3)` };
+  }
+
+  // 6. Check for identical line explosion (spam/malformed repeat > 60% of lines)
+  const lineFrequency: Record<string, number> = {};
+  for (const line of lines) {
+    const cleanLine = line.replace(/\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/g, '').trim().toLowerCase();
+    if (cleanLine.length > 3) {
+      lineFrequency[cleanLine] = (lineFrequency[cleanLine] || 0) + 1;
+      if (lineFrequency[cleanLine] > Math.max(10, lines.length * 0.65)) {
+        return { isValid: false, reason: `Identical line explosion detected for: "${cleanLine}"` };
+      }
+    }
+  }
+
+  // 7. If synced, validate timestamp monotonicity and bounds
+  if (isSynced) {
+    const timestampRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+    let lastTime = -1;
+    let validTimestampCount = 0;
+
+    for (const line of lines) {
+      timestampRegex.lastIndex = 0;
+      const match = timestampRegex.exec(line);
+      if (match) {
+        const mins = parseInt(match[1], 10);
+        const secs = parseInt(match[2], 10);
+        const ms = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+        const currentSec = mins * 60 + secs + ms / 1000;
+
+        if (currentSec < 0) {
+          return { isValid: false, reason: 'Negative timestamp found in synced lyrics' };
+        }
+
+        // Allow at most 0.1s backstep due to rounding in bad LRC files, but flag huge backwards jumps
+        if (lastTime >= 0 && currentSec < lastTime - 1.0) {
+          return { isValid: false, reason: `Non-monotonic timestamp jump: ${lastTime}s -> ${currentSec}s` };
+        }
+
+        // Check for absurd forward jumps (e.g. jumping over 2 hours on a song)
+        if (currentSec > 7200) {
+          return { isValid: false, reason: `Absurd timestamp: ${currentSec}s (> 2 hours)` };
+        }
+
+        lastTime = currentSec;
+        validTimestampCount++;
+      }
+    }
+
+    if (validTimestampCount < 3) {
+      return { isValid: false, reason: 'Insufficient valid timestamps for synced lyrics' };
+    }
+  }
+
+  return { isValid: true, sanitizedText: trimmed };
+}
+
+import type { LyricsCandidate } from './types';
+
+export function validateCandidate(cand: LyricsCandidate): ValidationResult {
+  // 1. If richSync exists (word-by-word timestamps)
+  if (cand.richSync && cand.richSync.length > 0) {
+    if (cand.richSync.length < 3) {
+      return { isValid: false, reason: `Insufficient richSync lines: ${cand.richSync.length} (minimum 3)` };
+    }
+    let lastTime = -1;
+    for (const line of cand.richSync) {
+      if (line.ts < 0 || line.te < line.ts) {
+        return { isValid: false, reason: `Invalid richSync line time: ts=${line.ts}, te=${line.te}` };
+      }
+      if (lastTime >= 0 && line.ts < lastTime - 1.0) {
+        return { isValid: false, reason: `Non-monotonic richSync timestamp: ${lastTime}s -> ${line.ts}s` };
+      }
+      lastTime = line.ts;
+    }
+    // Also validate lyrics text body
+    const plainText = cand.plainLyrics || cand.richSync.map((l) => l.l.map((w) => w.c).join('')).join('\n');
+    return validateLyricsContent(plainText, false);
+  }
+
+  // 2. If syncedLyrics exists (LRC format)
+  if (cand.syncedLyrics && cand.syncedLyrics.trim().length > 0) {
+    return validateLyricsContent(cand.syncedLyrics, true);
+  }
+
+  // 3. Plain lyrics
+  if (cand.plainLyrics && cand.plainLyrics.trim().length > 0) {
+    return validateLyricsContent(cand.plainLyrics, false);
+  }
+
+  return { isValid: false, reason: 'Candidate contains no lyrics content' };
+}
+
