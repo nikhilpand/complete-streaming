@@ -1,16 +1,25 @@
 'use client';
+
 import { useEffect, useRef } from 'react';
 import { usePlayerStore } from '@/store/playerStore';
 import { audioManager } from '@/lib/audio/AudioManager';
 import { resolveMedia } from '@/lib/api/songs';
+import { sendTelemetry } from '@/lib/api/telemetry';
 import { scheduleExtract, applyPalette } from '@/lib/color/colorExtractor';
 import { artistNames, artUrl } from '@/lib/utils';
+import type { Song } from '@/lib/api/types';
 
 export function usePlayback() {
   const prevIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastStoreTime = useRef<number>(0);
   const retryCountRef = useRef<Record<string, number>>({});
+
+  // Telemetry milestone tracking
+  const milestonesFiredRef = useRef<Record<string, boolean>>({});
+  const playheadRef = useRef<number>(0);
+  const durationRef = useRef<number>(0);
+  const activeTrackRef = useRef<Song | null>(null);
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const status = usePlayerStore((s) => s.status);
@@ -23,7 +32,7 @@ export function usePlayback() {
   const setError = usePlayerStore((s) => s.setError);
   const playNext = usePlayerStore((s) => s.playNext);
 
-  // ── 1. Wire AudioManager events → store ──
+  // ── 1. Wire AudioManager events → store & telemetry ──
   useEffect(() => {
     if (!audioManager) return;
     return audioManager.subscribe((ev) => {
@@ -46,6 +55,46 @@ export function usePlayback() {
           setBufferedTime(ev.bufferedTime);
           break;
         case 'timeupdate':
+          playheadRef.current = ev.currentTime;
+          durationRef.current = ev.duration;
+
+          // Milestone Telemetry
+          const track = activeTrackRef.current;
+          if (track) {
+            if (ev.currentTime >= 10 && !milestonesFiredRef.current.play_10s) {
+              milestonesFiredRef.current.play_10s = true;
+              sendTelemetry({
+                event_type: 'play_10s',
+                track_id: track.id,
+                position_ms: Math.round(ev.currentTime * 1000),
+                duration_ms: Math.round(ev.duration * 1000),
+              });
+            }
+            if (ev.currentTime >= 30 && !milestonesFiredRef.current.play_30s) {
+              milestonesFiredRef.current.play_30s = true;
+              sendTelemetry({
+                event_type: 'play_30s',
+                track_id: track.id,
+                position_ms: Math.round(ev.currentTime * 1000),
+                duration_ms: Math.round(ev.duration * 1000),
+              });
+            }
+            if (
+              ev.duration > 0 &&
+              ev.currentTime >= ev.duration * 0.5 &&
+              !milestonesFiredRef.current.play_50pct
+            ) {
+              milestonesFiredRef.current.play_50pct = true;
+              sendTelemetry({
+                event_type: 'play_50pct',
+                track_id: track.id,
+                position_ms: Math.round(ev.currentTime * 1000),
+                duration_ms: Math.round(ev.duration * 1000),
+                completion_ratio: ev.currentTime / ev.duration,
+              });
+            }
+          }
+
           // Throttle Zustand updates to 4Hz (250ms) to eliminate high-frequency React re-renders
           if (Math.abs(ev.currentTime - lastStoreTime.current) >= 0.25 || ev.currentTime === 0) {
             lastStoreTime.current = ev.currentTime;
@@ -54,6 +103,17 @@ export function usePlayback() {
           }
           break;
         case 'ended':
+          const endedTrack = activeTrackRef.current;
+          if (endedTrack && !milestonesFiredRef.current.completed) {
+            milestonesFiredRef.current.completed = true;
+            sendTelemetry({
+              event_type: 'completed',
+              track_id: endedTrack.id,
+              position_ms: Math.round(playheadRef.current * 1000),
+              duration_ms: Math.round(durationRef.current * 1000),
+              completion_ratio: 1.0,
+            });
+          }
           playNext();
           break;
         case 'volumechange':
@@ -62,12 +122,12 @@ export function usePlayback() {
           break;
         case 'error':
           // If error occurs mid-stream, attempt bounded recovery
-          const track = usePlayerStore.getState().currentTrack;
-          if (track && (retryCountRef.current[track.id] || 0) < 1) {
-            retryCountRef.current[track.id] = 1;
+          const cur = usePlayerStore.getState().currentTrack;
+          if (cur && (retryCountRef.current[cur.id] || 0) < 1) {
+            retryCountRef.current[cur.id] = 1;
             const resumePos = audioManager.currentTime;
             setStatus('loading');
-            resolveMedia(track.id)
+            resolveMedia(cur.id)
               .then(async (media) => {
                 if (!media?.streams?.length) throw new Error('No streams');
                 const best = [...media.streams].sort((a, b) => (b.bitrate_kbps ?? 0) - (a.bitrate_kbps ?? 0))[0];
@@ -114,7 +174,8 @@ export function usePlayback() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
-    navigator.mediaSession.playbackState = status === 'playing' ? 'playing' : status === 'paused' ? 'paused' : 'none';
+    navigator.mediaSession.playbackState =
+      status === 'playing' ? 'playing' : status === 'paused' ? 'paused' : 'none';
   }, [status]);
 
   useEffect(() => {
@@ -142,7 +203,7 @@ export function usePlayback() {
         }
       });
     } catch {
-      // Some browsers don't support all mediaSession actions
+      // Browser compatibility
     }
 
     return () => {
@@ -156,10 +217,36 @@ export function usePlayback() {
     };
   }, []);
 
-  // ── 3. Load + play when currentTrack changes (with single bounded retry) ──
+  // ── 3. Load + play when currentTrack changes (with skip telemetry tracking) ──
   useEffect(() => {
     if (!currentTrack || !audioManager) return;
     if (currentTrack.id === prevIdRef.current) return;
+
+    // Check skip telemetry on previous track
+    const prevTrack = activeTrackRef.current;
+    if (prevTrack && !milestonesFiredRef.current.completed) {
+      const pos = playheadRef.current;
+      if (pos > 0.5 && pos < 10) {
+        sendTelemetry({
+          event_type: 'skip_lt_10s',
+          track_id: prevTrack.id,
+          position_ms: Math.round(pos * 1000),
+          duration_ms: Math.round(durationRef.current * 1000),
+        });
+      } else if (pos >= 10 && pos < 30) {
+        sendTelemetry({
+          event_type: 'skip_10_30s',
+          track_id: prevTrack.id,
+          position_ms: Math.round(pos * 1000),
+          duration_ms: Math.round(durationRef.current * 1000),
+        });
+      }
+    }
+
+    // Reset milestone state for new track
+    activeTrackRef.current = currentTrack;
+    milestonesFiredRef.current = {};
+    playheadRef.current = 0;
     prevIdRef.current = currentTrack.id;
 
     abortRef.current?.abort();

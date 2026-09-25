@@ -33,13 +33,22 @@ function buildBackendUrl(path: string[], searchParams: URLSearchParams) {
   return `${BACKEND}${backendPath}${search}`;
 }
 
+function getProxyHeaders(req: NextRequest): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  for (const h of ['x-sway-user-id', 'x-sway-anon-id', 'x-sway-session-id']) {
+    const val = req.headers.get(h);
+    if (val) headers[h] = val;
+  }
+  return headers;
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const url = buildBackendUrl(path, req.nextUrl.searchParams);
 
   try {
     const res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: getProxyHeaders(req),
       signal: AbortSignal.timeout(15000),
     });
     const data = await res.json();
@@ -60,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     const body = await req.json().catch(() => ({}));
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getProxyHeaders(req),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
