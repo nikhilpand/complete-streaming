@@ -144,9 +144,9 @@ export function SearchCommand() {
                   {(results.songs?.length ?? 0) > 0 && (
                     <div className="py-2">
                       <p className="text-[10px] font-semibold text-[--muted] uppercase tracking-widest px-4 py-1.5">Songs</p>
-                      {results.songs!.slice(0, 5).map((item) => (
+                      {results.songs!.slice(0, 5).map((item, idx) => (
                         <button
-                          key={item.id}
+                          key={`${item.id}-${idx}`}
                           className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors text-left"
                           onClick={() => {
                             // Prefer enriched Song (with proper artists, lyrics_id, duration_ms)
@@ -168,8 +168,8 @@ export function SearchCommand() {
                   {(results.artists?.length ?? 0) > 0 && (
                     <div className="py-2 border-t border-white/[0.04]">
                       <p className="text-[10px] font-semibold text-[--muted] uppercase tracking-widest px-4 py-1.5">Artists</p>
-                      {results.artists!.slice(0, 3).map((item) => (
-                        <Link key={item.id} href={`/artist/${item.id}`} onClick={() => setOpen(false)}
+                      {results.artists!.slice(0, 3).map((item, idx) => (
+                        <Link key={`${item.id}-${idx}`} href={`/artist/${item.id}`} onClick={() => setOpen(false)}
                           className="flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors"
                         >
                           <Artwork src={item.artwork_url} alt={item.title} size={36} className="rounded-full" />
@@ -185,8 +185,8 @@ export function SearchCommand() {
                   {(results.albums?.length ?? 0) > 0 && (
                     <div className="py-2 border-t border-white/[0.04]">
                       <p className="text-[10px] font-semibold text-[--muted] uppercase tracking-widest px-4 py-1.5">Albums</p>
-                      {results.albums!.slice(0, 3).map((item) => (
-                        <Link key={item.id} href={`/album/${item.id}`} onClick={() => setOpen(false)}
+                      {results.albums!.slice(0, 3).map((item, idx) => (
+                        <Link key={`${item.id}-${idx}`} href={`/album/${item.id}`} onClick={() => setOpen(false)}
                           className="flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors"
                         >
                           <Artwork src={item.artwork_url} alt={item.title} size={36} className="rounded-[--radius-xs]" />

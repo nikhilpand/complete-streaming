@@ -54,35 +54,26 @@ class AudioProvider:
             async with client.stream("GET", stream_url) as response:
                 response.raise_for_status()
 
-                # Start ffmpeg process asynchronously
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                # Read audio stream chunks
+                chunks = []
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    chunks.append(chunk)
+                audio_bytes = b"".join(chunks)
 
-                async def feed_input():
-                    try:
-                        async for chunk in response.aiter_bytes(chunk_size=65536):
-                            if proc.stdin and not proc.stdin.is_closing():
-                                proc.stdin.write(chunk)
-                                await proc.stdin.drain()
-                    except Exception:
-                        pass
-                    finally:
-                        if proc.stdin and not proc.stdin.is_closing():
-                            proc.stdin.close()
-                            await proc.stdin.wait_closed()
+                def _decode_ffmpeg(input_bytes: bytes) -> bytes:
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    stdout_data, stderr_data = proc.communicate(input=input_bytes)
+                    if proc.returncode != 0 and len(stdout_data) == 0:
+                        err_msg = stderr_data.decode("utf-8", errors="replace").strip()
+                        raise RuntimeError(f"FFmpeg decode error (code {proc.returncode}): {err_msg}")
+                    return stdout_data
 
-                # Run feeder and stdout reader concurrently
-                feed_task = asyncio.create_task(feed_input())
-                stdout_data, stderr_data = await proc.communicate()
-                await feed_task
-
-                if proc.returncode != 0 and len(stdout_data) == 0:
-                    err_msg = stderr_data.decode("utf-8", errors="replace").strip()
-                    raise RuntimeError(f"FFmpeg decode error (code {proc.returncode}): {err_msg}")
+                stdout_data = await asyncio.to_thread(_decode_ffmpeg, audio_bytes)
 
                 if len(stdout_data) == 0:
                     raise RuntimeError("FFmpeg produced 0 bytes of decoded audio.")

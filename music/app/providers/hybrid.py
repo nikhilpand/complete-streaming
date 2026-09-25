@@ -133,7 +133,10 @@ def _rank_and_merge(
     # Deduplicate matching tracks
     merged: list[SearchItem] = []
     seen: list[tuple[str, set[str], SearchItem]] = []
+    seen_ids: set[str] = set()
     for score, item in scored_candidates:
+        if item.id in seen_ids:
+            continue
         t, a = _norm_info(item)
         dup = False
         for st, sa, sitem in seen:
@@ -141,6 +144,7 @@ def _rank_and_merge(
                 dup = True
                 break
         if not dup:
+            seen_ids.add(item.id)
             seen.append((t, a, item))
             merged.append(item)
             if len(merged) >= n:

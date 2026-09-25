@@ -165,14 +165,14 @@ export default function SearchPage() {
           {(tab === 'all' || tab === 'songs') && songs.length > 0 && (
             <section>
               <h2 className="text-base font-semibold text-[--foreground] mb-3 px-1">Songs</h2>
-              {songObjects.map((s, i) => <SongRow key={s.id} song={s} index={i} context={songObjects} />)}
+              {songObjects.map((s, i) => <SongRow key={`${s.id}-${i}`} song={s} index={i} context={songObjects} />)}
             </section>
           )}
           {(tab === 'all' || tab === 'artists') && artists.length > 0 && (
             <section>
               <h2 className="text-base font-semibold text-[--foreground] mb-4 px-1">Artists</h2>
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
-                {artists.map((a) => <ArtistCard key={a.id} id={a.id} name={a.title} artwork_url={a.artwork_url} />)}
+                {artists.map((a, i) => <ArtistCard key={`${a.id}-${i}`} id={a.id} name={a.title} artwork_url={a.artwork_url} />)}
               </div>
             </section>
           )}
@@ -180,7 +180,7 @@ export default function SearchPage() {
             <section>
               <h2 className="text-base font-semibold text-[--foreground] mb-4 px-1">Albums</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {albums.map((a) => <AlbumCard key={a.id} id={a.id} title={a.title} subtitle={a.subtitle} artwork_url={a.artwork_url} />)}
+                {albums.map((a, i) => <AlbumCard key={`${a.id}-${i}`} id={a.id} title={a.title} subtitle={a.subtitle} artwork_url={a.artwork_url} />)}
               </div>
             </section>
           )}
