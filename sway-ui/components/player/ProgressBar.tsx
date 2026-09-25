@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import { usePlayerStore } from '@/store/playerStore';
 import { audioManager } from '@/lib/audio/AudioManager';
 import { formatSecs } from '@/lib/utils';
@@ -8,7 +8,24 @@ export function ProgressBar() {
   const currentTime = usePlayerStore((s) => s.currentTime);
   const duration = usePlayerStore((s) => s.duration);
   const trackRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLDivElement>(null);
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  // Direct DOM updates on audioManager timeupdate for ultra-smooth 144fps playback with 0 React re-renders
+  useEffect(() => {
+    if (!audioManager) return;
+    return audioManager.subscribe((ev) => {
+      if (ev.type === 'timeupdate') {
+        const d = ev.duration || duration;
+        if (d > 0) {
+          const p = Math.min(100, Math.max(0, (ev.currentTime / d) * 100));
+          if (fillRef.current) fillRef.current.style.width = `${p}%`;
+          if (thumbRef.current) thumbRef.current.style.left = `calc(${p}% - 6px)`;
+        }
+      }
+    });
+  }, [duration]);
 
   const seek = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if (!trackRef.current || !duration) return;
@@ -16,8 +33,9 @@ export function ProgressBar() {
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const time = ratio * duration;
-    audioManager?.seek(time);
-    usePlayerStore.getState().setCurrentTime(time);
+    usePlayerStore.getState().seekTo(time);
+    if (fillRef.current) fillRef.current.style.width = `${ratio * 100}%`;
+    if (thumbRef.current) thumbRef.current.style.left = `calc(${ratio * 100}% - 6px)`;
   }, [duration]);
 
   return (
@@ -35,9 +53,10 @@ export function ProgressBar() {
         aria-valuemax={100}
       >
         <div className="w-full h-[3px] bg-white/10 rounded-full overflow-hidden">
-          <div className="h-full bg-[--art-primary] rounded-full" style={{ width: `${pct}%` }} />
+          <div ref={fillRef} className="h-full bg-[--art-primary] rounded-full" style={{ width: `${pct}%` }} />
         </div>
         <div
+          ref={thumbRef}
           className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-[--foreground] opacity-0 group-hover:opacity-100 transition-opacity"
           style={{ left: `calc(${pct}% - 6px)` }}
         />

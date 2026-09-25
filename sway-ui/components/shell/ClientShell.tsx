@@ -11,7 +11,7 @@ import { MobileNav } from '@/components/shell/MobileNav';
  * Imported via dynamic() with ssr:false from the Server Component layout
  * to avoid browser-API crashes during SSR.
  */
-export function ClientShell() {
+export default function ClientShell() {
   return (
     <>
       <PlaybackController />
@@ -23,3 +23,5 @@ export function ClientShell() {
     </>
   );
 }
+
+export { ClientShell };

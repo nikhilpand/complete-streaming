@@ -42,3 +42,27 @@ export function artUrl(url: string | undefined): string {
   if (!url) return '';
   return url.replace(/\b(50x50|150x150)\b/g, '500x500');
 }
+
+export function getSavedVolume(defaultVal = 0.8): number {
+  if (typeof window === 'undefined') return defaultVal;
+  try {
+    const raw = localStorage.getItem('sway_volume');
+    if (raw === null) return defaultVal;
+    const parsed = parseFloat(raw);
+    if (!isNaN(parsed) && isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+      return parsed;
+    }
+  } catch {}
+  return defaultVal;
+}
+
+export function getSavedMuted(defaultVal = false): boolean {
+  if (typeof window === 'undefined') return defaultVal;
+  try {
+    const raw = localStorage.getItem('sway_muted');
+    if (raw === null) return defaultVal;
+    return raw === 'true';
+  } catch {}
+  return defaultVal;
+}
+

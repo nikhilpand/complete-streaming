@@ -32,13 +32,22 @@ export function parseRichSync(richSync: RichSyncLine[]): RichSyncParseResult {
     for (let wIdx = 0; wIdx < rawWords.length; wIdx++) {
       const wObj = rawWords[wIdx];
       const wordText = String(wObj.c || '');
+      const cleanWordText = wordText.trim();
+      if (!cleanWordText) continue;
+
       const offsetMs = Math.round(Number(wObj.o || 0) * 1000);
       const startMs = lineStartMs + offsetMs;
 
-      // Word end is either the next word's start, or the line end
-      const nextWord = rawWords[wIdx + 1];
-      const nextOffsetMs = nextWord ? Math.round(Number(nextWord.o || 0) * 1000) : (lineEndMs - lineStartMs);
-      const endMs = Math.min(lineEndMs, lineStartMs + nextOffsetMs);
+      // Word end: Use exact duration if available, else next word start (with silence cap)
+      let endMs: number;
+      if (typeof wObj.d === 'number' && wObj.d > 0) {
+        endMs = startMs + Math.round(wObj.d * 1000);
+      } else {
+        const nextWord = rawWords[wIdx + 1];
+        const nextOffsetMs = nextWord ? Math.round(Number(nextWord.o || 0) * 1000) : (lineEndMs - lineStartMs);
+        const naturalCap = startMs + 1800; // avoid stretching past long vocal pauses
+        endMs = Math.min(lineEndMs, Math.min(naturalCap, lineStartMs + nextOffsetMs));
+      }
 
       // Section 16 Validation Rules:
       // 1. Monotonic start time
@@ -50,13 +59,13 @@ export function parseRichSync(richSync: RichSyncLine[]): RichSyncParseResult {
         lineWordsValid = false;
       }
       // 3. Inside line bounds
-      if (startMs < lineStartMs - 500 || endMs > lineEndMs + 1000) {
+      if (startMs < lineStartMs - 500 || endMs > lineEndMs + 1500) {
         lineWordsValid = false;
       }
 
-      fullOriginalText += (wIdx > 0 ? ' ' : '') + wordText;
+      fullOriginalText = fullOriginalText ? `${fullOriginalText} ${cleanWordText}` : cleanWordText;
       words.push({
-        text: wordText,
+        text: cleanWordText,
         startMs: Math.max(lineStartMs, startMs),
         endMs: Math.max(startMs, endMs),
       });

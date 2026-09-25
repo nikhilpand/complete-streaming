@@ -32,8 +32,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="flex h-screen overflow-hidden bg-[--surface] text-[--foreground]">
         <Sidebar />
-        {/* Main scroll area: pb-[136px] mobile (player 80 + nav 56), pb-[80px] md+ */}
-        <main className="flex-1 overflow-y-auto pb-[136px] md:pb-[80px]">{children}</main>
+        {/* Main scroll area: pb mobile (player 80 + nav 56 + safe-area), pb-[80px] md+ */}
+        <main className="flex-1 overflow-y-auto pb-[calc(136px+env(safe-area-inset-bottom,0px))] md:pb-[80px]">{children}</main>
         {/* All client-only overlays: player, lyrics, queue, search, mobile nav */}
         <ClientShellLoader />
       </body>

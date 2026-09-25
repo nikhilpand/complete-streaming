@@ -53,4 +53,4 @@ body {
 }
 
 /* Lyrics engine — imported LAST so it wins over Tailwind resets */
-@import "../../lyrics-engine/src/styles/lyrics-stage.css";
+@import "../styles/lyrics-stage.css";

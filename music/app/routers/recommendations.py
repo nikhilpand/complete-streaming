@@ -14,6 +14,7 @@ import sqlite3
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -42,31 +43,46 @@ router = APIRouter(tags=["recommendations"])
 DB_PATH = repo_root / "music_recs.db"
 _taste_engine: Optional[RecommendationEngine] = None
 _artwork_cache: Dict[str, str] = {}
+_db_initialized = False
 
 
+def _init_db() -> None:
+    global _db_initialized
+    if not _db_initialized:
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA busy_timeout = 5000;")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id TEXT PRIMARY KEY,
+                    settings_json TEXT,
+                    updated_ts REAL
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS event_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT,
+                    user_id TEXT,
+                    track_id TEXT,
+                    event_type TEXT,
+                    metadata_json TEXT,
+                    ts REAL
+                );
+            """)
+            conn.commit()
+        _db_initialized = True
+
+
+@contextmanager
 def get_db():
+    _init_db()
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_settings (
-            user_id TEXT PRIMARY KEY,
-            settings_json TEXT,
-            updated_ts REAL
-        );
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS event_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id TEXT,
-            user_id TEXT,
-            track_id TEXT,
-            event_type TEXT,
-            metadata_json TEXT,
-            ts REAL
-        );
-    """)
-    conn.commit()
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def get_taste_engine() -> RecommendationEngine:
@@ -206,19 +222,19 @@ def post_event(e: EventIn):
 
     # Persist log to SQLite
     try:
-        conn = get_db()
-        conn.execute(
-            "INSERT INTO event_log (event_id, user_id, track_id, event_type, metadata_json, ts) VALUES (?,?,?,?,?,?)",
-            (
-                user_event.event_id,
-                e.user_id,
-                sid,
-                e.type,
-                json.dumps({"title": e.title, "artist": e.artist, "genre": e.genre}),
-                time.time(),
-            ),
-        )
-        conn.commit()
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO event_log (event_id, user_id, track_id, event_type, metadata_json, ts) VALUES (?,?,?,?,?,?)",
+                (
+                    user_event.event_id,
+                    e.user_id,
+                    sid,
+                    e.type,
+                    json.dumps({"title": e.title, "artist": e.artist, "genre": e.genre}),
+                    time.time(),
+                ),
+            )
+            conn.commit()
     except Exception as ex:
         logger.warning("Failed to persist event to SQLite: %s", ex)
 
@@ -273,7 +289,7 @@ async def get_recommendations(
                 res = await provider.search(q, n=15)
                 return res.songs or []
             except Exception as e:
-                logger.debug("Provider search failed for query %s: %e", q, e)
+                logger.debug("Provider search failed for query %s: %s", q, e)
                 return []
 
         search_results = await asyncio.gather(*(fetch_query(q) for q in search_queries[:3]))
@@ -376,25 +392,25 @@ def get_taste(uid: str = "guest_user"):
 @router.get("/users/{uid}/settings")
 def get_user_settings(uid: str = "guest_user"):
     """Get persisted lyrics and player preferences."""
-    conn = get_db()
-    row = conn.execute(
-        "SELECT settings_json FROM user_settings WHERE user_id=?", (uid,)
-    ).fetchone()
-    if row and row["settings_json"]:
-        try:
-            return {"settings": json.loads(row["settings_json"])}
-        except Exception:
-            pass
-    return {"settings": {}}
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT settings_json FROM user_settings WHERE user_id=?", (uid,)
+        ).fetchone()
+        if row and row["settings_json"]:
+            try:
+                return {"settings": json.loads(row["settings_json"])}
+            except Exception:
+                pass
+        return {"settings": {}}
 
 
 @router.patch("/users/{uid}/settings")
 def update_user_settings(uid: str, body: UserSettingsIn):
     """Save lyrics and player preferences."""
-    conn = get_db()
-    conn.execute(
-        "INSERT OR REPLACE INTO user_settings (user_id, settings_json, updated_ts) VALUES (?,?,?)",
-        (uid, json.dumps(body.settings), time.time()),
-    )
-    conn.commit()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO user_settings (user_id, settings_json, updated_ts) VALUES (?,?,?)",
+            (uid, json.dumps(body.settings), time.time()),
+        )
+        conn.commit()
     return {"ok": True}

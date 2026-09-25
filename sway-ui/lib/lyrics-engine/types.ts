@@ -32,6 +32,25 @@ export interface TrackIdentity {
 
 export type SyncQuality = 'NONE' | 'LINE' | 'WORD' | 'DERIVED_WORD';
 
+export type LyricsSyncType = 'NONE' | 'LINE' | 'WORD' | 'SYLLABLE';
+
+export type TimingSource =
+  | 'bini'
+  | 'unison'
+  | 'musixmatch'
+  | 'backend-alignment'
+  | 'lrclib'
+  | 'saavn'
+  | 'fallback'
+  | 'unknown';
+
+export interface LyricsTimingProvenance {
+  syncType: LyricsSyncType;
+  timingSource: TimingSource;
+  isAuthenticTiming: boolean;
+  confidence: number;
+}
+
 export interface LyricsWord {
   text: string;
   startMs: number;
@@ -74,6 +93,7 @@ export interface LyricsDocument {
   };
   source: LyricsSource;
   syncQuality: SyncQuality;
+  provenance?: LyricsTimingProvenance;
   lines: LyricsLine[];
   plainText?: string;
   capabilities: LyricsCapabilities;
@@ -84,6 +104,7 @@ export interface LyricsDocument {
 export interface RichSyncWord {
   c: string; // character / word text
   o: number; // offset in seconds from line start
+  d?: number; // duration in seconds
 }
 
 export interface RichSyncLine {

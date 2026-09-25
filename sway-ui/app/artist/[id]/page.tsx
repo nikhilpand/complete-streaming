@@ -4,7 +4,6 @@ import { use } from 'react';
 import { Play, Shuffle } from 'lucide-react';
 import { getArtist } from '@/lib/api/artists';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { SongRow } from '@/components/music/SongRow';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { HorizontalShelf } from '@/components/music/HorizontalShelf';
@@ -65,7 +64,6 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
         <button
           disabled={loading || !topSongs.length}
           onClick={() => {
-            audioManager?.init();
             setQueue(topSongs, 0);
             setCurrentTrack(topSongs[0]);
           }}
@@ -76,7 +74,6 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
         <button
           disabled={loading || !topSongs.length}
           onClick={() => {
-            audioManager?.init();
             const s = [...topSongs].sort(() => Math.random() - 0.5);
             setQueue(s, 0);
             setCurrentTrack(s[0]);

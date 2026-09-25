@@ -4,7 +4,6 @@ import { use } from 'react';
 import { Play, Shuffle, Clock } from 'lucide-react';
 import { getAlbum } from '@/lib/api/albums';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { SongRow } from '@/components/music/SongRow';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -32,13 +31,11 @@ export default function AlbumPage({ params }: { params: Promise<{ id: string }> 
 
   function handlePlay(idx = 0) {
     if (!songs.length) return;
-    audioManager?.init();
     setQueue(songs, idx);
     setCurrentTrack(songs[idx]);
   }
   function handleShuffle() {
     if (!songs.length) return;
-    audioManager?.init();
     const s = [...songs].sort(() => Math.random() - 0.5);
     setQueue(s, 0);
     setCurrentTrack(s[0]);

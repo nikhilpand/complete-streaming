@@ -61,6 +61,8 @@ coverage/
 
 # Databases & Local state
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 music_recs.db

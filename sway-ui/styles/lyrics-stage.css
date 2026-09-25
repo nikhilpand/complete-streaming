@@ -334,6 +334,27 @@
 	text-shadow: none;
 }
 
+/* ════════════════════════════════════════════════════════════
+   UNSYNCED / PLAIN LYRICS STYLING
+   ════════════════════════════════════════════════════════════ */
+#blyrics-container.blyrics-unsynced {
+	padding-top: 4vh;
+	padding-bottom: 25vh;
+}
+
+#blyrics-container.blyrics-unsynced .blyrics--line {
+	opacity: 0.88;
+	filter: none !important;
+	transform: none !important;
+	cursor: default;
+}
+
+#blyrics-container.blyrics-unsynced .blyrics--line:hover {
+	opacity: 1 !important;
+	filter: none !important;
+	transform: none !important;
+}
+
 .blyrics--line:hover {
 	opacity: 0.82 !important;
 	filter: blur(0px) !important;

@@ -2,7 +2,6 @@
 import { Play, Pause, SkipBack, SkipForward, List, Mic2, Repeat, Shuffle, Repeat1, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { Artwork } from '@/components/artwork/Artwork';
 import { IconButton } from '@/components/ui/IconButton';
 import { ProgressBar } from './ProgressBar';
@@ -20,6 +19,7 @@ export function Player() {
   const playPrev = usePlayerStore((s) => s.playPrev);
   const toggleQueue = usePlayerStore((s) => s.toggleQueue);
   const toggleLyrics = usePlayerStore((s) => s.toggleLyrics);
+  const togglePlayPause = usePlayerStore((s) => s.togglePlayPause);
 
   if (!currentTrack) return null;
 
@@ -34,10 +34,7 @@ export function Player() {
       variant="prominent"
       className="rounded-full w-10 h-10"
       disabled={isLoading}
-      onClick={() => {
-        if (isPlaying) audioManager?.pause();
-        else audioManager?.play().catch(() => {});
-      }}
+      onClick={togglePlayPause}
       aria-label={isPlaying ? 'Pause' : 'Play'}
     >
       {isLoading ? (
@@ -61,7 +58,7 @@ export function Player() {
             animate={{ y: 0 }}
             exit={{ y: 80 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed bottom-[56px] md:bottom-0 left-0 right-0 z-40 h-[80px]"
+            className="fixed bottom-[calc(56px+env(safe-area-inset-bottom,0px))] md:bottom-0 left-0 right-0 z-40 h-[80px]"
           >
             <div className="absolute inset-0 bg-[--surface]/90 backdrop-blur-xl border-t border-white/[0.06]" />
             <div className="relative h-full flex flex-col px-4">

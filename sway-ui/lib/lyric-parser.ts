@@ -83,19 +83,16 @@ export function parseLRC(lrcText: string): ParsedLyricLine[] {
 
   parsedLines.sort((a, b) => a.time - b.time);
 
-  // Calculate end times and synthesize word timings for line-synced lyrics
+  // Calculate line end times. Missing word timing strictly produces words: [] (LINE != WORD)
   for (let i = 0; i < parsedLines.length; i++) {
     const current = parsedLines[i];
     const next = parsedLines[i + 1];
 
     current.endTime = next ? Math.min(next.time, current.time + 8) : current.time + 4;
 
-    if (!current.words || current.words.length === 0) {
-      if (!current.isInstrumental && current.text) {
-        current.words = synthesizeWordTimings(current.text, current.time, current.endTime);
-      } else {
-        current.words = [];
-      }
+    // Standard line sync has NO word timings. Real word sync only.
+    if (!current.words) {
+      current.words = [];
     }
   }
 
@@ -124,32 +121,6 @@ function parseEnhancedWords(content: string): ParsedWord[] {
 
   for (let i = 0; i < words.length; i++) {
     words[i].endTime = i < words.length - 1 ? words[i + 1].startTime : words[i].startTime + 0.6;
-  }
-
-  return words;
-}
-
-export function synthesizeWordTimings(lineText: string, startTime: number, endTime: number): ParsedWord[] {
-  const rawWords = lineText.trim().split(/\s+/);
-  if (!rawWords.length || !rawWords[0]) return [];
-
-  const totalDuration = Math.max(0.6, endTime - startTime);
-  const totalChars = rawWords.reduce((sum, w) => sum + Math.max(1, w.length), 0);
-
-  let cursor = startTime;
-  const words: ParsedWord[] = [];
-
-  for (const wordStr of rawWords) {
-    const charWeight = Math.max(1, wordStr.length) / totalChars;
-    const wordDuration = totalDuration * charWeight;
-
-    words.push({
-      text: wordStr,
-      startTime: Number(cursor.toFixed(3)),
-      endTime: Number((cursor + wordDuration).toFixed(3)),
-    });
-
-    cursor += wordDuration;
   }
 
   return words;

@@ -17,6 +17,9 @@ import {
   LyricsDocument,
   LyricsLine,
   SyncQuality,
+  LyricsSyncType,
+  TimingSource,
+  LyricsTimingProvenance,
   MatchScoreBreakdown,
 } from './types';
 
@@ -118,6 +121,12 @@ async function fetchBackendSynchronizedLyrics(identity: TrackIdentity): Promise<
         sourceReference: dbDoc.engine_used,
       },
       syncQuality: dbDoc.sync_type === 'DERIVED_WORD' ? 'DERIVED_WORD' : 'WORD',
+      provenance: {
+        syncType: dbDoc.sync_type === 'DERIVED_WORD' ? 'WORD' : 'SYLLABLE',
+        timingSource: 'backend-alignment',
+        isAuthenticTiming: true,
+        confidence: dbDoc.confidence || 0.95,
+      },
       lines: translitResult.lines,
       plainText: dbDoc.plain_text,
       capabilities: {
@@ -293,7 +302,39 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
   // 7. Script Detection & Transliteration (Sections 23, 24, 25, 27 & 28)
   const translitResult = enrichLinesWithRomanization(lines);
 
-  // 8. Assemble Unified Lyrics Document (Section 12 & 32)
+  // 8. Assemble Unified Lyrics Document with Timing Provenance
+  let syncType: LyricsSyncType = 'NONE';
+  let hasSyllableTiming = false;
+  if (bestCandidate.richSync && bestCandidate.richSync.length > 0) {
+    hasSyllableTiming = bestCandidate.richSync.some((line) => line.l?.some((w) => typeof w.d === 'number' && w.d > 0));
+  }
+
+  if (syncQuality === 'WORD') {
+    syncType = hasSyllableTiming ? 'SYLLABLE' : 'WORD';
+  } else if (syncQuality === 'LINE') {
+    syncType = 'LINE';
+  } else {
+    syncType = 'NONE';
+  }
+
+  const timingSourceMap: Record<string, TimingSource> = {
+    binilyrics: 'bini',
+    unison: 'unison',
+    musixmatch: 'musixmatch',
+    lrclib: 'lrclib',
+    jiosaavn: 'saavn',
+    alignment_worker: 'backend-alignment',
+  };
+  const timingSource: TimingSource = timingSourceMap[bestCandidate.providerId] || 'unknown';
+  const isAuthenticTiming = syncType !== 'NONE' && winner.score.totalScore >= 0.65;
+
+  const provenance: LyricsTimingProvenance = {
+    syncType,
+    timingSource,
+    isAuthenticTiming,
+    confidence: winner.score.totalScore,
+  };
+
   const doc: LyricsDocument = {
     status: 'FOUND',
     identity: {
@@ -310,6 +351,7 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
       sourceReference: bestCandidate.sourceReference,
     },
     syncQuality,
+    provenance,
     lines: translitResult.lines,
     plainText,
     capabilities: {
@@ -347,6 +389,12 @@ function createEmptyDocument(identity: TrackIdentity): LyricsDocument {
       confidence: 0.0,
     },
     syncQuality: 'NONE',
+    provenance: {
+      syncType: 'NONE',
+      timingSource: 'unknown',
+      isAuthenticTiming: false,
+      confidence: 0.0,
+    },
     lines: [],
     capabilities: {
       plain: false,

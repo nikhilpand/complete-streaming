@@ -4,7 +4,6 @@ import { use } from 'react';
 import { Play, Shuffle, Clock } from 'lucide-react';
 import { getPlaylist } from '@/lib/api/playlists';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { SongRow } from '@/components/music/SongRow';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -60,7 +59,6 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={() => {
-                    audioManager?.init();
                     setQueue(songs, 0);
                     setCurrentTrack(songs[0]);
                   }}
@@ -70,7 +68,6 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
                 </button>
                 <button
                   onClick={() => {
-                    audioManager?.init();
                     const s = [...songs].sort(() => Math.random() - 0.5);
                     setQueue(s, 0);
                     setCurrentTrack(s[0]);

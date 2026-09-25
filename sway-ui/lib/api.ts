@@ -3,6 +3,7 @@
  */
 
 import { artUrl } from './utils';
+import type { LyricsTimingProvenance } from './lyrics-engine/types';
 
 export function getProxiedImageUrl(url?: string, width = 500, height = 500): string {
   if (!url) return '';
@@ -13,6 +14,7 @@ export interface LyricsResponse {
   status?: 'FOUND' | 'NOT_FOUND';
   synced: boolean;
   syncQuality?: 'NONE' | 'LINE' | 'WORD' | 'DERIVED_WORD';
+  provenance?: LyricsTimingProvenance;
   provider?: string;
   confidence?: number;
   hasWordTiming?: boolean;
@@ -74,7 +76,7 @@ export async function fetchLyrics(
         const hasWordTiming = doc.syncQuality === 'WORD' || doc.capabilities?.wordSync;
 
         // Map lines to time / endTime in seconds for lyric rendering stage
-        const mappedLines = Array.isArray(doc.lines)
+        const mappedLines = (isSynced && Array.isArray(doc.lines))
           ? doc.lines.map((l: any) => ({
               time: l.startMs !== null && l.startMs !== undefined ? l.startMs / 1000 : (l.time ?? 0),
               endTime: l.endMs !== null && l.endMs !== undefined ? l.endMs / 1000 : (l.endTime ?? 0),
@@ -96,6 +98,12 @@ export async function fetchLyrics(
           status: 'FOUND',
           synced: isSynced,
           syncQuality: doc.syncQuality || (isSynced ? (hasWordTiming ? 'WORD' : 'LINE') : 'NONE'),
+          provenance: doc.provenance || {
+            syncType: isSynced ? (hasWordTiming ? 'WORD' : 'LINE') : 'NONE',
+            timingSource: (doc.source?.provider || doc.provider || 'unknown') as any,
+            isAuthenticTiming: Boolean(hasWordTiming || (isSynced && mappedLines && mappedLines.length > 0)),
+            confidence: doc.confidence || doc.source?.confidence || 0.95,
+          },
           hasWordTiming,
           provider: doc.source?.provider || doc.provider || 'lrclib',
           confidence: doc.confidence || doc.source?.confidence || 0.95,
@@ -129,6 +137,12 @@ export async function fetchLyrics(
             status: 'FOUND',
             synced: true,
             syncQuality: 'LINE',
+            provenance: {
+              syncType: 'LINE',
+              timingSource: 'lrclib',
+              isAuthenticTiming: true,
+              confidence: 0.85,
+            },
             lrc: syncedItem.syncedLyrics,
             provider: 'lrclib',
             confidence: 0.85,
@@ -140,6 +154,12 @@ export async function fetchLyrics(
             status: 'FOUND',
             synced: false,
             syncQuality: 'NONE',
+            provenance: {
+              syncType: 'NONE',
+              timingSource: 'lrclib',
+              isAuthenticTiming: false,
+              confidence: 0.80,
+            },
             plain: plainItem.plainLyrics,
             provider: 'lrclib',
             confidence: 0.80,
@@ -149,5 +169,14 @@ export async function fetchLyrics(
     }
   } catch (_) {}
 
-  return { synced: false, status: 'NOT_FOUND' };
+  return {
+    synced: false,
+    status: 'NOT_FOUND',
+    provenance: {
+      syncType: 'NONE',
+      timingSource: 'unknown',
+      isAuthenticTiming: false,
+      confidence: 0,
+    },
+  };
 }

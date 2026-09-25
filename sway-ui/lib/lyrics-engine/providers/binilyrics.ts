@@ -13,6 +13,7 @@ import { providerHealthTracker } from '../health';
 const MIRRORS = [
   'https://lyricsplus.binimum.org/v2/lyrics/get',
   'https://lyrics-api.binimum.org/v2/lyrics/get',
+  'https://atomix.one/lyrics/get',
 ];
 
 export class BiniLyricsProvider implements ILyricsProvider {
@@ -27,13 +28,16 @@ export class BiniLyricsProvider implements ILyricsProvider {
       return [];
     }
 
-    const primaryArtist = identity.artists[0] || '';
-    const cleanTitle = normalized.cleanTitle || identity.title;
+    const titles = Array.from(new Set([normalized.cleanTitle, identity.title].filter(Boolean)));
+    const artists = identity.artists.slice(0, 3).filter((a) => a && a !== 'Unknown Artist');
+    if (artists.length === 0) artists.push('');
 
-    const queries = [
-      { title: cleanTitle, artist: primaryArtist },
-      { title: identity.title, artist: primaryArtist },
-    ];
+    const queries: { title: string; artist: string }[] = [];
+    for (const art of artists) {
+      for (const tit of titles) {
+        queries.push({ title: tit, artist: art });
+      }
+    }
 
     for (const q of queries) {
       if (!q.title.trim()) continue;
@@ -84,6 +88,7 @@ export class BiniLyricsProvider implements ILyricsProvider {
               l: (l.syllabus || []).map((s: any) => ({
                 c: s.text,
                 o: (s.time - l.time) / 1000.0,
+                d: s.duration ? s.duration / 1000.0 : undefined,
               })),
             }));
 

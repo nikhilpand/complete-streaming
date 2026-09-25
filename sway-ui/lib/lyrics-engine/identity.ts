@@ -54,17 +54,28 @@ export function createTrackIdentity(raw: {
 
   // Normalize artists list
   let artists: string[] = [];
+  const cleanPotentialSubtitle = (str: string): string => {
+    if (str.includes('·') || str.includes('•') || str.includes('|')) {
+      const parts = str.split(/\s*[·•|]\s*/).filter(Boolean);
+      if (parts.length >= 2) return parts[parts.length - 1];
+    }
+    return str;
+  };
+
   if (Array.isArray(raw.artists) && raw.artists.length > 0) {
-    artists = raw.artists.map((a) => a.trim()).filter(Boolean);
+    artists = raw.artists
+      .map((a) => cleanPotentialSubtitle(a.trim()))
+      .filter(Boolean);
   } else if (raw.artist && raw.artist !== 'Unknown Artist') {
-    artists = raw.artist
+    const cleaned = cleanPotentialSubtitle(raw.artist);
+    artists = cleaned
       .split(/[,&/|]|\sfeat\.\s*|\sft\.\s*/i)
       .map((a) => a.trim())
       .filter(Boolean);
   } else if (raw.subtitle) {
-    const parts = raw.subtitle.split('·').map((s) => s.trim()).filter(Boolean);
+    const parts = raw.subtitle.split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
     if (parts.length >= 2) {
-      artists = parts[1].split(/[,&/|]|\sfeat\.\s*|\sft\.\s*/i).map((a) => a.trim()).filter(Boolean);
+      artists = parts[parts.length - 1].split(/[,&/|]|\sfeat\.\s*|\sft\.\s*/i).map((a) => a.trim()).filter(Boolean);
     } else if (parts.length === 1) {
       artists = [parts[0]];
     }
@@ -74,7 +85,7 @@ export function createTrackIdentity(raw: {
     artists = ['Unknown Artist'];
   }
 
-  const album = (raw.album || (raw.subtitle?.split('·')[0]?.trim()) || '').trim();
+  const album = (raw.album || (raw.subtitle?.split(/\s*[·•|]\s*/)[0]?.trim()) || '').trim();
   const durationMs = raw.durationMs || (raw.duration ? Math.round(raw.duration * 1000) : 0);
   const version = detectTrackVersion(title, album);
 

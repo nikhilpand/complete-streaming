@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
         source: doc.source,
         identity: doc.identity,
         syncQuality: doc.syncQuality,
+        provenance: doc.provenance,
         lines: doc.lines,
         plainText: doc.plainText,
         capabilities: doc.capabilities,

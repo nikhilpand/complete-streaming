@@ -1,3 +1,5 @@
+import { getSavedVolume, getSavedMuted } from '@/lib/utils';
+
 type Listener = (event: AudioEvent) => void;
 
 export type AudioEvent =
@@ -7,6 +9,7 @@ export type AudioEvent =
   | { type: 'loading' }
   | { type: 'canplay' }
   | { type: 'timeupdate'; currentTime: number; duration: number }
+  | { type: 'progress'; bufferedTime: number }
   | { type: 'error'; message: string }
   | { type: 'volumechange'; volume: number; muted: boolean };
 
@@ -19,7 +22,8 @@ class AudioManager {
     if (this.audio) return this.audio;
     const a = new Audio();
     a.preload = 'auto';
-    a.volume = 0.8;
+    a.volume = getSavedVolume(0.8);
+    a.muted = getSavedMuted(false);
 
     a.addEventListener('play', () => {
       this.emit({ type: 'play' });
@@ -39,6 +43,9 @@ class AudioManager {
     });
     a.addEventListener('waiting', () => this.emit({ type: 'loading' }));
     a.addEventListener('canplay', () => this.emit({ type: 'canplay' }));
+    a.addEventListener('progress', () => {
+      this.emit({ type: 'progress', bufferedTime: this.bufferedTime });
+    });
     a.addEventListener('volumechange', () =>
       this.emit({ type: 'volumechange', volume: a.volume, muted: a.muted })
     );
@@ -142,6 +149,10 @@ class AudioManager {
   get volume() { return this.audio?.volume ?? 0.8; }
   get muted() { return this.audio?.muted ?? false; }
   get paused() { return this.audio?.paused ?? true; }
+  get bufferedTime(): number {
+    if (!this.audio || this.audio.buffered.length === 0) return 0;
+    return this.audio.buffered.end(this.audio.buffered.length - 1);
+  }
   get audioElement(): HTMLAudioElement | null { return this.audio; }
 }
 

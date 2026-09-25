@@ -1,7 +1,6 @@
 'use client';
 import { Play, Pause, MoreHorizontal } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { Artwork } from '@/components/artwork/Artwork';
 import { cn, formatMs, artistNames } from '@/lib/utils';
 import type { Song } from '@/lib/api/types';
@@ -25,14 +24,9 @@ export function SongRow({ song, index, context, showAlbum = true }: Props) {
 
   function handleClick() {
     if (isCurrent && status !== 'error') {
-      if (isPlaying) {
-        audioManager?.pause();
-      } else {
-        audioManager?.play().catch((err) => console.error(err));
-      }
+      usePlayerStore.getState().togglePlayPause();
       return;
     }
-    audioManager?.init();
     if (context) {
       const idx = context.findIndex((s) => s.id === song.id);
       setQueue(context, idx >= 0 ? idx : 0);

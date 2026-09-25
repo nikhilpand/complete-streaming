@@ -1,8 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { search } from '@/lib/api/search';
-import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { ArtistCard } from '@/components/music/ArtistCard';
 import { HorizontalShelf } from '@/components/music/HorizontalShelf';
@@ -19,12 +18,14 @@ const MOODS = [
 ];
 
 function itemToSong(item: NonNullable<SearchResponseData['songs']>[0]): Song {
-  const parts = (item.subtitle || '').split('·').map((s) => s.trim());
+  const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
+  const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+  const albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
   return {
     id: item.id, provider: item.provider, provider_id: item.provider_id,
     type: 'song', title: item.title, subtitle: item.subtitle,
-    artists: [{ id: '', name: parts[1] || parts[0] || '', role: 'primary' }],
-    album: parts[0] || '', artwork_url: item.artwork_url, has_media: true,
+    artists: [{ id: '', name: artistName, role: 'primary' }],
+    album: albumName, artwork_url: item.artwork_url, has_media: true,
   };
 }
 
@@ -38,8 +39,6 @@ interface Section {
 export default function LibraryPage() {
   const [sections, setSections] = useState<Section[]>([]);
   const [loading, setLoading] = useState(true);
-  const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
-  const setQueue = usePlayerStore((s) => s.setQueue);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -83,13 +82,13 @@ export default function LibraryPage() {
       <section>
         <div className="flex flex-wrap gap-2">
           {MOODS.map((m) => (
-            <a
+            <Link
               key={m.label}
               href={`/search?q=${encodeURIComponent(m.query)}`}
               className="px-4 py-2 rounded-[--radius-sm] bg-[--surface-elevated] text-[--foreground] text-sm font-medium hover:bg-[--surface-elevated-hover] transition-colors"
             >
               {m.label}
-            </a>
+            </Link>
           ))}
         </div>
       </section>

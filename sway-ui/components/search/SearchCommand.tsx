@@ -4,7 +4,6 @@ import { Search, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { search } from '@/lib/api/search';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { Artwork } from '@/components/artwork/Artwork';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -129,7 +128,6 @@ export function SearchCommand() {
                           key={item.id}
                           className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors text-left"
                           onClick={() => {
-                            audioManager?.init();
                             // Prefer enriched Song (with proper artists, lyrics_id, duration_ms)
                             const song = enrichedMap.get(item.id) ?? toSong(item);
                             usePlayerStore.getState().setCurrentTrack(song);

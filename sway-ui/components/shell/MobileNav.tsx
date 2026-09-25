@@ -21,7 +21,13 @@ export function MobileNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 h-[56px] flex items-center border-t border-white/[0.07]">
+    <nav
+      className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center border-t border-white/[0.07]"
+      style={{
+        height: 'calc(56px + env(safe-area-inset-bottom, 0px))',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      }}
+    >
       {/* Frosted glass surface */}
       <div className="absolute inset-0 bg-[--surface]/95 backdrop-blur-xl" />
 

@@ -4,7 +4,6 @@ import React, {
   useEffect, useRef, useState, memo, useMemo, useCallback,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAudioPlayer } from '@/store/useAudioPlayer';
 import { usePlayerStore } from '@/store/playerStore';
 import { audioManager } from '@/lib/audio/AudioManager';
 import {
@@ -12,14 +11,17 @@ import {
   Shuffle, Repeat, Repeat1, Loader2, X, Music2, RotateCcw,
   Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles,
 } from 'lucide-react';
-import { parseLRC, findActiveIndex, synthesizeWordTimings, type ParsedLyricLine } from '@/lib/lyric-parser';
+import { parseLRC, findActiveIndex, type ParsedLyricLine } from '@/lib/lyric-parser';
 import { getProxiedImageUrl, fetchLyrics } from '@/lib/api';
 import { isDevanagari, devanagariToRoman } from '@/lib/transliteration';
-import { FastAverageColor } from 'fast-average-color';
 import Link from 'next/link';
 import { useLyricsSettings, getLyricsCSSVars } from '@/store/useLyricsSettings';
 import { LyricsSettingsPopover } from './LyricsSettingsPopover';
+import { DesktopLyricsProgressBar } from './lyrics/DesktopLyricsProgressBar';
+import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
 import { usePlaybackTelemetry, type RecommendationTrack } from '@/hooks/usePlaybackTelemetry';
+import { artistNames } from '@/lib/utils';
+import type { LyricsTimingProvenance, LyricsSyncType } from '@/lib/lyrics-engine/types';
 
 
 // ─── Format Time mm:ss ──────────────────────────────────────────────────
@@ -88,161 +90,38 @@ const LyricLine = memo(({
 });
 LyricLine.displayName = 'LyricLine';
 
-// ─── Desktop Progress Bar (isolates 144fps currentTime re-renders) ────────
-const DesktopLyricsProgressBar = memo(({
-  duration,
-  seekTo,
-}: {
-  duration: number;
-  seekTo: (time: number) => void;
-}) => {
-  const currentTime = usePlayerStore((s) => s.currentTime);
-  const [isSeeking, setIsSeeking] = useState(false);
-  const [seekVal, setSeekVal] = useState(0);
-  const [bufferedTime, setBufferedTime] = useState(0);
-
-  useEffect(() => {
-    const audio = audioManager?.audioElement;
-    if (!audio) return;
-    const updateBuffer = () => {
-      if (audio.buffered.length > 0) {
-        setBufferedTime(audio.buffered.end(audio.buffered.length - 1));
-      }
-    };
-    audio.addEventListener('progress', updateBuffer);
-    return () => audio.removeEventListener('progress', updateBuffer);
-  }, []);
-
-  const currentProgress = duration > 0 ? ((isSeeking ? seekVal : currentTime) / duration) * 100 : 0;
-  const bufferedProgress = duration > 0 ? (bufferedTime / duration) * 100 : 0;
-
-  return (
-    <div className="hidden lg:block w-full max-w-[340px] space-y-1.5 pt-1">
-      <div
-        className="blyrics-progress-track group cursor-pointer"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-          seekTo(pct * duration);
-        }}
-      >
-        <div className="blyrics-progress-buffered" style={{ width: `${Math.min(100, bufferedProgress)}%` }} />
-        <div className="blyrics-progress-fill" style={{ width: `${Math.min(100, currentProgress)}%` }} />
-        <div
-          className="blyrics-progress-thumb"
-          style={{ left: `${Math.min(100, currentProgress)}%` }}
-        />
-      </div>
-
-      <div className="flex items-center justify-between text-[11px] font-mono font-medium text-white/50 px-0.5">
-        <span>{formatTime(isSeeking ? seekVal : currentTime)}</span>
-        <span>-{formatTime(Math.max(0, duration - (isSeeking ? seekVal : currentTime)))}</span>
-      </div>
-    </div>
-  );
-});
-DesktopLyricsProgressBar.displayName = 'DesktopLyricsProgressBar';
-
-// ─── Mobile Bottom Controls & Mini Seek (isolates currentTime) ────────────
-const MobileLyricsControls = memo(({
-  duration,
-  seekTo,
-  pillBg,
-  pillActive,
-  shuffle,
-  repeat,
-  isPlaying,
-  isLoading,
-  toggleShuffle,
-  skipPrev,
-  togglePlayPause,
-  skipNext,
-  cycleRepeat,
-}: {
-  duration: number;
-  seekTo: (time: number) => void;
-  pillBg: string;
-  pillActive: string;
-  shuffle: boolean;
-  repeat: string;
-  isPlaying: boolean;
-  isLoading: boolean;
-  toggleShuffle: () => void;
-  skipPrev: () => void;
-  togglePlayPause: () => void;
-  skipNext: () => void;
-  cycleRepeat: () => void;
-}) => {
-  const currentTime = usePlayerStore((s) => s.currentTime);
-  const currentProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
-
-  return (
-    <div className="lg:hidden fixed bottom-3 left-3 right-3 z-[250] flex flex-col items-center gap-2 max-w-md mx-auto pointer-events-auto">
-      {/* Mobile Mini Scrub Bar */}
-      <div
-        className="w-full h-1.5 bg-white/15 rounded-full overflow-hidden relative cursor-pointer active:h-2.5 transition-all"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-          seekTo(pct * duration);
-        }}
-      >
-        <div
-          className="h-full bg-white rounded-full transition-all"
-          style={{ width: `${Math.min(100, currentProgress)}%` }}
-        />
-      </div>
-
-      {/* Mobile Glass Controls Pill */}
-      <div
-        className="blyrics-controls-pill w-full flex items-center justify-between px-5 py-2 shadow-2xl backdrop-blur-3xl border border-white/10"
-        style={{ background: pillBg }}
-      >
-        <button type="button" onClick={toggleShuffle} aria-label="Shuffle" className="p-1 cursor-pointer">
-          <Shuffle size={18} color={shuffle ? 'white' : 'rgba(255,255,255,0.4)'} />
-        </button>
-        <button type="button" onClick={skipPrev} aria-label="Previous" className="p-1 cursor-pointer">
-          <SkipBack size={21} color="white" />
-        </button>
-        <button
-          type="button"
-          onClick={togglePlayPause}
-          aria-label={isPlaying ? 'Pause' : 'Play'}
-          className="blyrics-play-btn"
-          style={{ background: pillActive }}
-        >
-          {isLoading ? (
-            <Loader2 size={20} className="animate-spin text-white" />
-          ) : isPlaying ? (
-            <Pause size={20} color="white" />
-          ) : (
-            <Play size={20} fill="white" color="white" className="ml-0.5" />
-          )}
-        </button>
-        <button type="button" onClick={skipNext} aria-label="Next" className="p-1 cursor-pointer">
-          <SkipForward size={21} color="white" />
-        </button>
-        <button type="button" onClick={cycleRepeat} aria-label="Repeat" className="p-1 cursor-pointer">
-          {repeat === 'one' ? (
-            <Repeat1 size={18} color="white" />
-          ) : (
-            <Repeat size={18} color={repeat === 'off' ? 'rgba(255,255,255,0.4)' : 'white'} />
-          )}
-        </button>
-      </div>
-    </div>
-  );
-});
-MobileLyricsControls.displayName = 'MobileLyricsControls';
-
 // ─── Main FullScreenLyrics Component ─────────────────────────────────────
 export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
-  const {
-    currentTrack, isPlaying, isLoading,
-    togglePlayPause, skipNext, skipPrev,
-    seekTo, shuffle, repeat, toggleShuffle, cycleRepeat,
-    toggleLyrics,
-  } = useAudioPlayer();
+  const rawTrack = usePlayerStore((s) => s.currentTrack);
+  const status = usePlayerStore((s) => s.status);
+  const isPlaying = status === 'playing';
+  const isLoading = status === 'loading';
+  const togglePlayPause = usePlayerStore((s) => s.togglePlayPause);
+  const skipNext = usePlayerStore((s) => s.playNext);
+  const skipPrev = usePlayerStore((s) => s.playPrev);
+  const seekTo = usePlayerStore((s) => s.seekTo);
+  const shuffle = usePlayerStore((s) => s.isShuffled);
+  const repeatMode = usePlayerStore((s) => s.repeatMode);
+  const repeat = repeatMode === 'none' ? 'off' : repeatMode;
+  const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
+  const cycleRepeat = usePlayerStore((s) => s.cycleRepeat);
+  const toggleLyrics = usePlayerStore((s) => s.toggleLyrics);
+
+  const currentTrack = useMemo(() => {
+    if (!rawTrack) return null;
+    return {
+      id: rawTrack.id,
+      videoId: rawTrack.id,
+      title: rawTrack.title || '',
+      artist: artistNames(rawTrack.artists, rawTrack.subtitle),
+      thumbnail: rawTrack.artwork_url || '',
+      album: rawTrack.album || (rawTrack.subtitle?.split(/\s*[·•|]\s*/)[0]?.trim()) || '',
+      subtitle: rawTrack.subtitle || '',
+      lyricsId: rawTrack.lyrics_id,
+      hasLyrics: rawTrack.has_lyrics,
+      duration: rawTrack.duration_ms ? rawTrack.duration_ms / 1000 : 0,
+    };
+  }, [rawTrack]);
 
   const duration = usePlayerStore((s) => s.duration) || (currentTrack?.duration || 0);
   const volume = usePlayerStore((s) => s.volume);
@@ -326,20 +205,18 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         e.preventDefault();
         togglePlayPause();
       } else if (e.key === 'm' || e.key === 'M') {
-        const next = !isMuted;
-        setMuted(next);
-        audioManager?.setMuted(next);
+        setMuted(!isMuted);
       } else if (e.key === 'n' || e.key === 'N') {
         skipNext();
       } else if (e.key === 'p' || e.key === 'P') {
         skipPrev();
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        const cur = audioManager?.currentTime ?? 0;
+        const cur = usePlayerStore.getState().currentTime;
         seekTo(Math.max(0, cur - 5));
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        const cur = audioManager?.currentTime ?? 0;
+        const cur = usePlayerStore.getState().currentTime;
         seekTo(Math.min(duration, cur + 5));
       } else if (e.key === '[') {
         const trackKey = currentTrack?.id || (currentTrack as any)?.videoId;
@@ -368,6 +245,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const [lyricsError, setLyricsError] = useState(false);
   const [lyricsProvider, setLyricsProvider] = useState<string>('');
   const [lyricsSyncQuality, setLyricsSyncQuality] = useState<string>('LINE');
+  const [provenance, setProvenance] = useState<LyricsTimingProvenance | null>(null);
   const [hasHindiScript, setHasHindiScript] = useState<boolean>(false);
 
   // --- User Manual Scroll & Touch Handling ---
@@ -381,11 +259,6 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const touchLastTime = useRef(0);
   const touchVelocity = useRef(0);
   const isDragging = useRef(false);
-
-
-  // --- Colors extracted from album art ---
-  const [albumColor, setAlbumColor] = useState<{ h: number; s: number; l: number } | null>(null);
-
   // --- DOM refs for the 144fps engine ---
   const containerRef    = useRef<HTMLDivElement>(null);
   const wrapperRef      = useRef<HTMLDivElement>(null);
@@ -398,40 +271,13 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const isInitialPositionSet = useRef(false);
 
   const coverUrl = currentTrack?.thumbnail ? getProxiedImageUrl(currentTrack.thumbnail, 500, 500) : '';
-  const isRich = useMemo(() => activeLyrics.some(l => l.words.length > 1 && l.words.some(w => w.startTime !== l.time)), [activeLyrics]);
 
-  // ── Extract album colors (HSL for CSS vars) ──
-
-  useEffect(() => {
-    if (!coverUrl) return;
-    const fac = new FastAverageColor();
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = coverUrl;
-    img.onload = () => {
-      try {
-        const color = fac.getColor(img);
-        const r = color.value[0], g = color.value[1], b = color.value[2];
-        const r1 = r / 255, g1 = g / 255, b1 = b / 255;
-        const max = Math.max(r1, g1, b1), min = Math.min(r1, g1, b1);
-        let h = 0, s = 0;
-        const l = (max + min) / 2;
-        if (max !== min) {
-          const d = max - min;
-          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-          if (max === r1) h = ((g1 - b1) / d + (g1 < b1 ? 6 : 0)) / 6;
-          else if (max === g1) h = ((b1 - r1) / d + 2) / 6;
-          else h = ((r1 - g1) / d + 4) / 6;
-        }
-        setAlbumColor({ h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) });
-      } catch {
-        setAlbumColor({ h: 215, s: 35, l: 18 });
-      }
-    };
-    img.onerror = () => {
-      setAlbumColor({ h: 215, s: 35, l: 18 });
-    };
-  }, [coverUrl]);
+  // Authentic timing contract: word sweeping is active ONLY for verified WORD/SYLLABLE sync
+  const isRich = useMemo(() => {
+    if (!provenance?.isAuthenticTiming) return false;
+    if (provenance.syncType !== 'WORD' && provenance.syncType !== 'SYLLABLE') return false;
+    return activeLyrics.some((l) => Array.isArray(l.words) && l.words.length > 0);
+  }, [activeLyrics, provenance]);
 
   // ── Fetch lyrics via Ultra Lyrics Engine ──
   useEffect(() => {
@@ -447,6 +293,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     setLyricsError(false);
     setActiveLyrics([]);
     setLyricsProvider('');
+    setLyricsSyncQuality('LINE');
     setHasHindiScript(false);
     lastActiveIdx.current = -1;
     lastProcTime.current = 0;
@@ -479,20 +326,25 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         if (cancelled) return;
         if (data.provider) setLyricsProvider(data.provider);
         if (data.syncQuality) setLyricsSyncQuality(data.syncQuality);
+        if (data.provenance) setProvenance(data.provenance);
 
-        if (data.lines && data.lines.length > 0) {
+        const isAuthenticWordSync = data.provenance
+          ? (data.provenance.isAuthenticTiming && (data.provenance.syncType === 'WORD' || data.provenance.syncType === 'SYLLABLE'))
+          : (data.syncQuality === 'WORD');
+
+        if (data.synced && data.lines && data.lines.length > 0) {
           const parsedLines: ParsedLyricLine[] = data.lines.map((l: any) => {
             const rawTime = (l.startMs !== undefined && l.startMs !== null) ? l.startMs / 1000 : (l.time ?? 0);
             const rawEndTime = (l.endMs !== undefined && l.endMs !== null) ? l.endMs / 1000 : (l.endTime ?? (rawTime + 3));
             const rawText = l.original || l.text || '';
-            const rawWords = Array.isArray(l.words) && l.words.length > 0
+            const rawWords = (isAuthenticWordSync && Array.isArray(l.words) && l.words.length > 0)
               ? l.words.map((w: any) => ({
                   text: w.text,
                   startTime: (w.startMs !== undefined && w.startMs !== null) ? w.startMs / 1000 : (w.startTime ?? 0),
                   endTime: (w.endMs !== undefined && w.endMs !== null) ? w.endMs / 1000 : (w.endTime ?? 0),
                   romanized: w.romanized,
                 }))
-              : (!l.isInstrumental && rawText.trim() ? synthesizeWordTimings(rawText, rawTime, rawEndTime) : []);
+              : [];
 
             return {
               time: rawTime,
@@ -511,6 +363,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           const parsed = parseLRC(data.lrc);
           const enriched = parsed.map((l) => ({
             ...l,
+            words: [], // Pure line sync: no fake words
             romanized: isDevanagari(l.text) ? devanagariToRoman(l.text) : undefined,
           }));
           setActiveLyrics(enriched.length > 0 ? enriched : []);
@@ -518,28 +371,28 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
             setHasHindiScript(true);
           }
           if (enriched.length === 0 && !data.plain) setLyricsError(true);
-        } else if (data.plain) {
+        } else if (data.plain || (data.lines && data.lines.length > 0)) {
           setLyricsSyncQuality('NONE');
-          const lines = data.plain.split('\n').map((l) => l.trim()).filter(Boolean);
-          const audioEl = audioManager?.audioElement;
-          const totalSec = (audioEl && !isNaN(audioEl.duration) && audioEl.duration > 10)
-            ? audioEl.duration
-            : (trackDuration || 180);
-          const lineDuration = Math.max(2.5, totalSec / Math.max(1, lines.length));
-          const synthesizedLines: ParsedLyricLine[] = lines.map((text, idx) => {
-            const startTime = Number((idx * lineDuration).toFixed(2));
-            const endTime = Number(((idx + 1) * lineDuration).toFixed(2));
-            return {
-              time: startTime,
-              endTime,
-              text,
-              romanized: isDevanagari(text) ? devanagariToRoman(text) : undefined,
-              words: synthesizeWordTimings(text, startTime, endTime),
-              isInstrumental: false,
-            };
+          setProvenance({
+            syncType: 'NONE',
+            timingSource: 'unknown',
+            isAuthenticTiming: false,
+            confidence: 0,
           });
-          setActiveLyrics(synthesizedLines);
-          if (synthesizedLines.some(l => isDevanagari(l.text))) {
+          const plainLines: string[] = data.plain
+            ? data.plain.split('\n').map((l: string) => l.trim()).filter(Boolean)
+            : (data.lines || []).map((l: any) => (l.original || l.text || '').trim()).filter(Boolean);
+
+          const unSyncedLines: ParsedLyricLine[] = plainLines.map((text: string) => ({
+            time: -1,
+            endTime: -1,
+            text,
+            romanized: isDevanagari(text) ? devanagariToRoman(text) : undefined,
+            words: [],
+            isInstrumental: false,
+          }));
+          setActiveLyrics(unSyncedLines);
+          if (unSyncedLines.some(l => isDevanagari(l.text))) {
             setHasHindiScript(true);
           }
         } else {
@@ -729,6 +582,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     let lastTick = 0;       // for throttled lyrics-sync work (7ms gate)
     let lastScrollT = -1;   // -1 = sentinel: skip lerp on very first frame
 
+    const isPlain = lyricsSyncQuality === 'NONE' || provenance?.syncType === 'NONE';
+
     const tick = (now: number) => {
       if (!running) return;
 
@@ -751,13 +606,18 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         }
       }
 
+      // If lyrics are plain / unsynced, do NOT run lyrics sync, active line highlighting, or auto-scrolling
+      if (isPlain) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
       // ── Lyrics sync — throttled to ~7ms (avoid over-computing) ─────────
       if (now - lastTick >= 7) {
         lastTick = now;
 
-        const audioEl = audioManager?.audioElement;
-        const rawTime = (audioEl && !isNaN(audioEl.currentTime) && audioEl.currentTime >= 0)
-          ? audioEl.currentTime
+        const rawTime = (audioManager && !isNaN(audioManager.currentTime) && audioManager.currentTime >= 0)
+          ? audioManager.currentTime
           : usePlayerStore.getState().currentTime || 0;
 
         const { base, rich } = offsetCache.current;
@@ -875,7 +735,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       running = false;
       cancelAnimationFrame(rafId);
     };
-  }, [activeLyrics, isRich, currentTrack?.id, (currentTrack as any)?.videoId]);
+  }, [activeLyrics, isRich, lyricsSyncQuality, provenance, currentTrack?.id, (currentTrack as any)?.videoId]);
 
 
   if (!currentTrack) return null;
@@ -885,10 +745,10 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     ? currentTrack.artist.split(/,\s*|\s*&\s*/).filter(Boolean)
     : ['Unknown Artist'];
 
-  // Dynamic palette from album
-  const bgMain     = albumColor ? `hsl(${albumColor.h}deg,${albumColor.s}%,${Math.max(albumColor.l - 15, 6)}%)` : '#0a0d13';
-  const pillBg     = albumColor ? `hsl(${albumColor.h}deg,${albumColor.s - 5}%,${albumColor.l - 4}%)` : 'rgba(25, 30, 42, 0.65)';
-  const pillActive = albumColor ? `hsl(${albumColor.h}deg,${Math.min(albumColor.s + 15, 80)}%,${albumColor.l + 30}%)` : 'rgba(255,255,255,0.22)';
+  // Dynamic palette from CSS custom properties (updated on root via colorExtractor)
+  const bgMain     = 'var(--art-bg-main, #0a0d13)';
+  const pillBg     = 'var(--art-pill-bg, rgba(25, 30, 42, 0.65))';
+  const pillActive = 'var(--art-pill-active, rgba(255,255,255,0.22))';
 
   // Generate CSS styles from lyrics settings
   const customCSSVars = getLyricsCSSVars(lyricsSettings);
@@ -903,10 +763,6 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       style={{
         background: bgMain,
         '--blyrics-background-img': coverUrl ? `url(${coverUrl})` : 'none',
-        // Art-color hue/sat/lightness for CSS word-sweep, glow, aurora, accent bar
-        '--art-h': albumColor ? `${albumColor.h}` : '215',
-        '--art-s': albumColor ? `${Math.max(20, albumColor.s)}%` : '40%',
-        '--art-l': albumColor ? `${albumColor.l}%` : '50%',
         ...customCSSVars,
       } as React.CSSProperties}
     >
@@ -1090,9 +946,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           <button
             type="button"
             onClick={() => {
-              const next = !isMuted;
-              setMuted(next);
-              audioManager?.setMuted(next);
+              setMuted(!isMuted);
             }}
             aria-label={isMuted ? 'Unmute' : 'Mute'}
             className="hover:text-white transition-colors cursor-pointer"
@@ -1115,9 +969,6 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
             onChange={(e) => {
               const val = parseFloat(e.target.value);
               setVolume(val);
-              if (isMuted) setMuted(false);
-              audioManager?.setVolume(val);
-              audioManager?.setMuted(false);
             }}
             className="w-full h-1 bg-white/15 rounded-lg accent-white cursor-pointer"
             aria-label="Volume level"
@@ -1136,7 +987,12 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         onClick={handleLineClick}
       >
         <div ref={wrapperRef} id="blyrics-wrapper">
-          <div id="blyrics-container" ref={containerRef} style={customCSSVars}>
+          <div
+            id="blyrics-container"
+            ref={containerRef}
+            className={lyricsSyncQuality === 'NONE' ? 'blyrics-unsynced' : ''}
+            style={customCSSVars}
+          >
             {activeLyrics.length > 0 ? (
               activeLyrics.map((line, lIdx) => (
                 <LyricLine
@@ -1165,7 +1021,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
 
         {/* Floating "Sync to Now" Resume Pill */}
         <AnimatePresence>
-          {isUserScrolling && activeLyrics.length > 0 && (
+          {lyricsSyncQuality !== 'NONE' && isUserScrolling && activeLyrics.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1191,15 +1047,6 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         seekTo={seekTo}
         pillBg={pillBg}
         pillActive={pillActive}
-        shuffle={shuffle}
-        repeat={repeat}
-        isPlaying={isPlaying}
-        isLoading={isLoading}
-        toggleShuffle={toggleShuffle}
-        skipPrev={skipPrev}
-        togglePlayPause={togglePlayPause}
-        skipNext={skipNext}
-        cycleRepeat={cycleRepeat}
       />
 
 

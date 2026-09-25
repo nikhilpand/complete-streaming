@@ -13,6 +13,12 @@
   --art-secondary: #222222;
   --art-accent: #ffffff;
   --art-wash: rgba(51, 51, 51, 0.1);
+  --art-h: 215;
+  --art-s: 35%;
+  --art-l: 18%;
+  --art-bg-main: hsl(var(--art-h), var(--art-s), max(calc(var(--art-l) - 15%), 6%));
+  --art-pill-bg: hsl(var(--art-h), max(calc(var(--art-s) - 5%), 10%), max(calc(var(--art-l) - 4%), 10%));
+  --art-pill-active: hsl(var(--art-h), min(calc(var(--art-s) + 15%), 80%), min(calc(var(--art-l) + 30%), 85%));
 
   /* Spacing */
   --space-1: 4px;

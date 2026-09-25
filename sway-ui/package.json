@@ -9,7 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@levelup/lyrics-engine": "file:../lyrics-engine",
     "@tanstack/react-virtual": "^3.14.13",
     "clsx": "^2.1.1",
     "fast-average-color": "^9.6.0",

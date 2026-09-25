@@ -3,7 +3,6 @@ import { useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ListMusic, Music2 } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { artUrl, artistNames, formatMs, cn } from '@/lib/utils';
 
 export function QueuePanel() {
@@ -16,7 +15,6 @@ export function QueuePanel() {
   const playAt = useCallback((index: number) => {
     const song = queue[index];
     if (!song) return;
-    audioManager?.init();
     usePlayerStore.getState().setQueue(queue, index);
     usePlayerStore.getState().setCurrentTrack(song);
   }, [queue]);

@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import { search } from '@/lib/api/search';
 import { usePlayerStore } from '@/store/playerStore';
-import { audioManager } from '@/lib/audio/AudioManager';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { ArtistCard } from '@/components/music/ArtistCard';
 import { SongRow } from '@/components/music/SongRow';
@@ -109,7 +108,6 @@ export default function HomePage() {
             <button
               className="mt-4 px-6 py-2.5 bg-[--foreground] text-[--surface] rounded-[--radius-md] text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer"
               onClick={() => {
-                audioManager?.init();
                 setQueue(songObjects, 0);
                 setCurrentTrack(featured);
               }}

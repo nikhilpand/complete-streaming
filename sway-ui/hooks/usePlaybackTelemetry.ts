@@ -35,6 +35,8 @@ export function usePlaybackTelemetry(userId: string = 'guest_user') {
   const playLogged = useRef(false);
   const completeLogged = useRef(false);
   const trackStartTime = useRef<number>(0);
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
 
   const sendEvent = useCallback(
     async (
@@ -64,7 +66,7 @@ export function usePlaybackTelemetry(userId: string = 'guest_user') {
             title,
             artist,
             album,
-            position_ms: Math.round(currentTime * 1000),
+            position_ms: Math.round(currentTimeRef.current * 1000),
             duration_ms: Math.round(trackDuration * 1000),
           }),
         });
@@ -72,7 +74,7 @@ export function usePlaybackTelemetry(userId: string = 'guest_user') {
         // Silently tolerate network glitches
       }
     },
-    [trackId, trackTitle, trackArtist, trackAlbum, currentTime, trackDuration, userId]
+    [trackId, trackTitle, trackArtist, trackAlbum, trackDuration, userId]
   );
 
   // Track playback start and track transitions
