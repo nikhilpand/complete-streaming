@@ -41,6 +41,8 @@ class DecayConfig(BaseModel):
     """
     Multi-horizon exponential half-life time decay parameters (in days).
     """
+    rolling_days: int = 30
+    rolling_half_life_days: float = 7.0
     recent_half_life_days: float = 7.0
     long_term_half_life_days: float = 60.0
 

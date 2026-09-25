@@ -26,6 +26,8 @@ from .storage import (
     SQLiteTasteStore,
     InMemoryStore,
 )
+from .normalizer import EventNormalizer
+from .profile import TasteProfileBuilder
 from .engine import RecommendationEngine
 
 __all__ = [
@@ -51,5 +53,7 @@ __all__ = [
     "TasteStore",
     "SQLiteTasteStore",
     "InMemoryStore",
+    "EventNormalizer",
+    "TasteProfileBuilder",
     "RecommendationEngine",
 ]
