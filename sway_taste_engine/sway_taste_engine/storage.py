@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
@@ -218,11 +219,30 @@ class SQLiteTasteStore(TasteStore):
     and indexed tables for sub-millisecond retrieval.
     """
 
-    def __init__(self, db_path: str = "music_recs.db", timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        db_path: str = "music_recs.db",
+        timeout: float = 5.0,
+        catalog_ttl_sec: float = 30.0,
+    ) -> None:
         self.db_path = db_path
         self.timeout = timeout
+        self.catalog_ttl_sec = catalog_ttl_sec
         self._catalog_cache: dict[str, Track] | None = None
+        self._catalog_cached_at: float = 0.0
         self._init_db()
+
+    def invalidate_catalog_cache(self) -> None:
+        """Explicitly invalidate the in-memory catalog cache."""
+        self._catalog_cache = None
+        self._catalog_cached_at = 0.0
+
+    def _is_cache_valid(self) -> bool:
+        if self._catalog_cache is None:
+            return False
+        if (time.monotonic() - self._catalog_cached_at) > self.catalog_ttl_sec:
+            return False
+        return True
 
     @contextmanager
     def _connect(self) -> Generator[sqlite3.Connection, None, None]:
@@ -340,9 +360,11 @@ class SQLiteTasteStore(TasteStore):
     def upsert_tracks(self, tracks: list[Track]) -> None:
         if not tracks:
             return
-        if self._catalog_cache is not None:
+        if self._is_cache_valid() and self._catalog_cache is not None:
             for t in tracks:
                 self._catalog_cache[t.id] = t
+        else:
+            self.invalidate_catalog_cache()
         rows = [
             (
                 t.id,
@@ -373,7 +395,7 @@ class SQLiteTasteStore(TasteStore):
             )
 
     def get_track(self, track_id: str) -> Track | None:
-        if self._catalog_cache is not None and track_id in self._catalog_cache:
+        if self._is_cache_valid() and self._catalog_cache is not None and track_id in self._catalog_cache:
             return self._catalog_cache[track_id]
         with self._connect() as conn:
             row = conn.execute(
@@ -382,22 +404,23 @@ class SQLiteTasteStore(TasteStore):
             if not row:
                 return None
             track = Track.model_validate_json(row["data_json"])
-            if self._catalog_cache is not None:
+            if self._is_cache_valid() and self._catalog_cache is not None:
                 self._catalog_cache[track_id] = track
             return track
 
     def all_tracks(self) -> list[Track]:
-        if self._catalog_cache is not None:
+        if self._is_cache_valid() and self._catalog_cache is not None:
             return list(self._catalog_cache.values())
         with self._connect() as conn:
             rows = conn.execute("SELECT data_json FROM tracks;").fetchall()
             tracks = [Track.model_validate_json(r["data_json"]) for r in rows]
             self._catalog_cache = {t.id: t for t in tracks}
+            self._catalog_cached_at = time.monotonic()
             return tracks
 
     @property
     def tracks(self) -> dict[str, Track]:
-        if self._catalog_cache is None:
+        if not self._is_cache_valid():
             self.all_tracks()
         return self._catalog_cache or {}
 
