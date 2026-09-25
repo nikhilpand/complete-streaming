@@ -367,3 +367,175 @@ async def test_search_query_cache(hybrid_provider, mock_saavn, mock_youtube):
     assert len(res2.songs) == 1
     # Upstream call count must still be 1
     assert mock_saavn.search.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cache_returns_isolated_deep_copy_not_mutated_shared_instance(hybrid_provider, mock_saavn, mock_youtube):
+    """
+    SearchResults returned from cache must be an isolated deep copy.
+    Mutations by one caller must never bleed into subsequent calls.
+    """
+    orig_item = SearchItem(id="saavn:mut_test", provider="saavn", provider_id="m1", type="song", title="Original Title")
+    mock_saavn.search.return_value = SearchResults(
+        query="mutate test",
+        songs=[orig_item],
+        albums=[],
+        artists=[],
+        playlists=[],
+        total_songs=1,
+        total_albums=0,
+        total_artists=0,
+        total_playlists=0,
+    )
+    mock_youtube.search.return_value = SearchResults(
+        query="mutate test",
+        songs=[],
+        albums=[],
+        artists=[],
+        playlists=[],
+        total_songs=0,
+        total_albums=0,
+        total_artists=0,
+        total_playlists=0,
+    )
+
+    res1 = await hybrid_provider.search("mutate test", n=5)
+    assert res1.songs[0].title == "Original Title"
+
+    # Mutate res1 directly
+    res1.songs[0].title = "CORRUPTED MUTATED TITLE"
+    res1.songs.append(SearchItem(id="saavn:injected", provider="saavn", provider_id="inj", type="song", title="Injected"))
+
+    # Fetch again from cache
+    res2 = await hybrid_provider.search("mutate test", n=5)
+    assert len(res2.songs) == 1
+    assert res2.songs[0].title == "Original Title"
+    assert res2.songs[0].id == "saavn:mut_test"
+
+
+@pytest.mark.asyncio
+async def test_inflight_request_coalescing_burst_searches(hybrid_provider, mock_saavn, mock_youtube):
+    """
+    Rapid burst searches for the exact same query arriving simultaneously
+    must coalesce into a single upstream provider call instead of duplicating requests.
+    """
+    async def delayed_saavn(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return SearchResults(
+            query="burst query",
+            songs=[SearchItem(id="saavn:burst_1", provider="saavn", provider_id="b1", type="song", title="Burst Song")],
+            albums=[],
+            artists=[],
+            playlists=[],
+            total_songs=1,
+            total_albums=0,
+            total_artists=0,
+            total_playlists=0,
+        )
+
+    mock_saavn.search.side_effect = delayed_saavn
+    mock_youtube.search.return_value = SearchResults(
+        query="burst query",
+        songs=[],
+        albums=[],
+        artists=[],
+        playlists=[],
+        total_songs=0,
+        total_albums=0,
+        total_artists=0,
+        total_playlists=0,
+    )
+
+    # Launch 5 concurrent searches for the same query
+    tasks = [hybrid_provider.search("burst query", n=5) for _ in range(5)]
+    results = await asyncio.gather(*tasks)
+
+    for r in results:
+        assert len(r.songs) == 1
+        assert r.songs[0].id == "saavn:burst_1"
+
+    # Upstream should only have been called once despite 5 simultaneous requests
+    assert mock_saavn.search.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_enrichment_does_not_fabricate_fallback_on_resolution_failure(hybrid_provider, mock_saavn, mock_youtube):
+    """
+    When provider resolution fails or throws, no synthetic/fabricated Song with
+    fake artist IDs or placeholder metadata is included in enriched_songs.
+    The item is cleanly omitted from enriched_songs.
+    """
+    yt_item = SearchItem(
+        id="youtube:failed_yt_id",
+        provider="youtube",
+        provider_id="failed_yt_id",
+        type="song",
+        title="Unresolvable Video",
+        subtitle="Some Artist",
+    )
+    mock_saavn.search.return_value = SearchResults(
+        query="unresolvable",
+        songs=[],
+        albums=[],
+        artists=[],
+        playlists=[],
+        total_songs=0,
+        total_albums=0,
+        total_artists=0,
+        total_playlists=0,
+    )
+    mock_youtube.search.return_value = SearchResults(
+        query="unresolvable",
+        songs=[yt_item],
+        albums=[],
+        artists=[],
+        playlists=[],
+        total_songs=1,
+        total_albums=0,
+        total_artists=0,
+        total_playlists=0,
+    )
+    # Simulate provider failure
+    mock_youtube.get_song.side_effect = RuntimeError("YouTube player extraction failed")
+
+    results = await hybrid_provider.search("unresolvable", n=5, enrich=True)
+    assert len(results.songs) == 1
+    # SearchItem is present in songs listing
+    assert results.songs[0].id == "youtube:failed_yt_id"
+    # BUT enriched_songs must be empty: ZERO fabricated Song objects with fake artist IDs!
+    assert results.enriched_songs == []
+
+
+@pytest.mark.asyncio
+async def test_combined_query_no_false_positive_on_substring_in_unrelated_word(hybrid_provider, mock_saavn, mock_youtube):
+    """
+    Query 'high quality hits':
+    Song with artist 'Ali' must NOT get the +110 combined title+artist bonus
+    simply because 'ali' is a substring of the word 'quality'.
+    """
+    song_ali = SearchItem(
+        id="saavn:ali_song",
+        provider="saavn",
+        provider_id="ali_song",
+        type="song",
+        title="Hits",
+        subtitle="Ali",
+        extra={"primary_artists": "Ali"},
+    )
+    song_target = SearchItem(
+        id="saavn:quality_song",
+        provider="saavn",
+        provider_id="quality_song",
+        type="song",
+        title="High Quality Hits",
+        subtitle="Studio Sound",
+        extra={"primary_artists": "Studio Sound"},
+    )
+
+    score_ali = _score_relevance("high quality hits", song_ali, 0)
+    score_target = _score_relevance("high quality hits", song_target, 1)
+
+    # Ali should not receive the +110 combined match bonus
+    # Target should rank significantly higher than song_ali
+    assert score_target > score_ali
+
