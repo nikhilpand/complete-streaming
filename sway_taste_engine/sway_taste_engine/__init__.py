@@ -30,6 +30,8 @@ from .metadata import extract_track_features, clean_track_id
 from .normalizer import EventNormalizer
 from .profile import TasteProfileBuilder
 from .similarity import SimilarityEngine
+from .queue_planner import QueuePlanner
+from .mix_planner import MixPlanner, HomeShelf
 from .engine import RecommendationEngine
 
 __all__ = [
@@ -60,5 +62,8 @@ __all__ = [
     "EventNormalizer",
     "TasteProfileBuilder",
     "SimilarityEngine",
+    "QueuePlanner",
+    "MixPlanner",
+    "HomeShelf",
     "RecommendationEngine",
 ]

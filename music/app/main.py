@@ -33,7 +33,7 @@ from app.providers.saavn.client import SaavnClient
 from app.providers.saavn.provider import SaavnProvider
 from app.providers.youtube.provider import YouTubeProvider
 from app.providers.hybrid import HybridMusicProvider
-from app.routers import albums, artists, health, lyrics, playlists, recommendations, search, songs
+from app.routers import albums, artists, health, home, lyrics, playlists, queue, recommendations, search, songs
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +177,8 @@ def create_app() -> FastAPI:
     app.include_router(lyrics.router, prefix=api_prefix)
     app.include_router(recommendations.router, prefix=api_prefix)
     app.include_router(recommendations.router)
+    app.include_router(home.router, prefix=api_prefix)
+    app.include_router(queue.router, prefix=api_prefix)
     app.include_router(health.router, prefix=api_prefix)
     app.include_router(health.router)
 

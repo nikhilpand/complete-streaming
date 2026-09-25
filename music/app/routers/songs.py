@@ -44,7 +44,14 @@ async def _resolve_or_search_song(provider, song_id: str):
                     return await provider.get_song(res.songs[0].id)
             except Exception:
                 pass
-        raise
+async def get_song_by_id(song_id: str, provider=None) -> Optional[Song]:
+    """Helper to look up a song by ID using the provider."""
+    if not provider:
+        return None
+    try:
+        return await _resolve_or_search_song(provider, song_id)
+    except Exception:
+        return None
 
 
 @router.get("", response_model=APIResponse, summary="Get song(s) by ID or URL")
