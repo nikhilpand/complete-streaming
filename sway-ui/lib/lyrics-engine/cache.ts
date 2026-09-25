@@ -26,6 +26,12 @@ class LyricsL1Cache {
   }
 
   set(identityHash: string, doc: LyricsDocument) {
+    const existing = this.cache.get(identityHash);
+    if (existing && existing.doc.syncQuality === 'WORD' && doc.syncQuality !== 'WORD') {
+      // Do not overwrite high-tier WORD sync with lower-tier LINE/NONE sync
+      return;
+    }
+
     if (this.cache.size >= this.maxItems) {
       const oldestKey = this.cache.keys().next().value;
       if (oldestKey) this.cache.delete(oldestKey);

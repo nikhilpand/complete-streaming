@@ -23,10 +23,16 @@ export function formatCount(n: number): string {
 
 export function artistNames(artists?: { name: string }[], subtitle?: string): string {
   const fromList = artists?.map((a) => a.name).filter(Boolean).join(', ');
-  if (fromList) return fromList;
+  if (fromList) {
+    if (fromList.includes('·') || fromList.includes('•')) {
+      const parts = fromList.split(/\s*[·•|]\s*/).filter(Boolean);
+      if (parts.length >= 2) return parts[parts.length - 1];
+    }
+    return fromList;
+  }
   if (subtitle) {
-    const parts = subtitle.split('·').map((s) => s.trim()).filter(Boolean);
-    if (parts.length >= 2) return parts[1];
+    const parts = subtitle.split(/\s*[·•|]\s*/).filter(Boolean);
+    if (parts.length >= 2) return parts[parts.length - 1];
     if (parts.length === 1) return parts[0];
   }
   return 'Unknown Artist';

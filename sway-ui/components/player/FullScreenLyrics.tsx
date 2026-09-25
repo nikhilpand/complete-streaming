@@ -274,31 +274,33 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
 
   // Load liked state from localStorage
   useEffect(() => {
-    if (!currentTrack?.videoId) return;
+    const trackId = currentTrack?.id || (currentTrack as any)?.videoId;
+    if (!trackId) return;
     try {
-      const stored = localStorage.getItem(`sway_liked_${currentTrack.videoId}`);
+      const stored = localStorage.getItem(`sway_liked_${trackId}`);
       setIsLiked(stored === 'true');
     } catch {
       setIsLiked(false);
     }
-  }, [currentTrack?.videoId]);
+  }, [currentTrack?.id, (currentTrack as any)?.videoId]);
 
   const toggleLike = useCallback(() => {
-    if (!currentTrack?.videoId) return;
+    const trackId = currentTrack?.id || (currentTrack as any)?.videoId;
+    if (!trackId) return;
     const next = !isLiked;
     setIsLiked(next);
     try {
-      localStorage.setItem(`sway_liked_${currentTrack.videoId}`, next ? 'true' : 'false');
+      localStorage.setItem(`sway_liked_${trackId}`, next ? 'true' : 'false');
     } catch {}
     if (next) telemetry.logLike();
     else telemetry.logUnlike();
-  }, [currentTrack?.videoId, isLiked, telemetry]);
+  }, [currentTrack?.id, (currentTrack as any)?.videoId, isLiked, telemetry]);
 
   // Fetch recommendations for Up Next drawer
   useEffect(() => {
     if (!isDrawerOpen) return;
     setRecsLoading(true);
-    const trackId = currentTrack?.videoId || '';
+    const trackId = currentTrack?.id || (currentTrack as any)?.videoId || '';
     const url = `/api/proxy/recommendations?current_track_id=${encodeURIComponent(trackId)}&n=12`;
     fetch(url)
       .then((res) => (res.ok ? res.json() : []))
@@ -307,7 +309,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       })
       .catch(() => setRecommendations([]))
       .finally(() => setRecsLoading(false));
-  }, [isDrawerOpen, currentTrack?.videoId]);
+  }, [isDrawerOpen, currentTrack?.id, (currentTrack as any)?.videoId]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -340,15 +342,16 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         const cur = audioManager?.currentTime ?? 0;
         seekTo(Math.min(duration, cur + 5));
       } else if (e.key === '[') {
-        if (currentTrack?.videoId) {
-          const curr = lyricsSettings.getTrackSyncOffset(currentTrack.videoId);
-          lyricsSettings.setTrackSyncOffset(currentTrack.videoId, curr - 100);
+        const trackKey = currentTrack?.id || (currentTrack as any)?.videoId;
+        if (trackKey) {
+          const curr = lyricsSettings.getTrackSyncOffset(trackKey);
+          lyricsSettings.setTrackSyncOffset(trackKey, curr - 50);
         }
       } else if (e.key === ']') {
         const trackKey = currentTrack?.id || (currentTrack as any)?.videoId;
         if (trackKey) {
           const curr = lyricsSettings.getTrackSyncOffset(trackKey);
-          lyricsSettings.setTrackSyncOffset(trackKey, curr + 100);
+          lyricsSettings.setTrackSyncOffset(trackKey, curr + 50);
         }
       }
     };
@@ -389,7 +392,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const lastActiveIdx   = useRef(-1);
   const lastProcTime    = useRef(0);
   const elemCache       = useRef<Map<number, { elt: HTMLElement; words: HTMLElement[]; dots: HTMLElement[] }>>(new Map());
-  const offsetCache     = useRef({ base: 0.115, rich: 0.150, scroll: 0.500 });
+  const offsetCache     = useRef({ base: 0.0, rich: 0.0, scroll: 0.500 });
   const currentScrollY  = useRef(0);
   const targetScrollY   = useRef(0);
   const isInitialPositionSet = useRef(false);
@@ -482,12 +485,14 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
             const rawTime = (l.startMs !== undefined && l.startMs !== null) ? l.startMs / 1000 : (l.time ?? 0);
             const rawEndTime = (l.endMs !== undefined && l.endMs !== null) ? l.endMs / 1000 : (l.endTime ?? (rawTime + 3));
             const rawText = l.original || l.text || '';
-            const rawWords = Array.isArray(l.words) ? l.words.map((w: any) => ({
-              text: w.text,
-              startTime: (w.startMs !== undefined && w.startMs !== null) ? w.startMs / 1000 : (w.startTime ?? 0),
-              endTime: (w.endMs !== undefined && w.endMs !== null) ? w.endMs / 1000 : (w.endTime ?? 0),
-              romanized: w.romanized,
-            })) : [];
+            const rawWords = Array.isArray(l.words) && l.words.length > 0
+              ? l.words.map((w: any) => ({
+                  text: w.text,
+                  startTime: (w.startMs !== undefined && w.startMs !== null) ? w.startMs / 1000 : (w.startTime ?? 0),
+                  endTime: (w.endMs !== undefined && w.endMs !== null) ? w.endMs / 1000 : (w.endTime ?? 0),
+                  romanized: w.romanized,
+                }))
+              : (!l.isInstrumental && rawText.trim() ? synthesizeWordTimings(rawText, rawTime, rawEndTime) : []);
 
             return {
               time: rawTime,
@@ -756,13 +761,14 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           : usePlayerStore.getState().currentTime || 0;
 
         const { base, rich } = offsetCache.current;
-        const customOffsetMs = currentTrack?.videoId
-          ? lyricsSettings.getTrackSyncOffset(currentTrack.videoId)
+        const trackKey = currentTrack?.id || (currentTrack as any)?.videoId;
+        const customOffsetMs = trackKey
+          ? lyricsSettings.getTrackSyncOffset(trackKey)
           : 0;
         const userOffsetSec = customOffsetMs / 1000;
 
         const offset = (isRich ? rich : base) + userOffsetSec;
-        const highlightTime = rawTime + offset + 0.035;
+        const highlightTime = rawTime + offset;
         const currentTime_  = rawTime + offset;
         const isSeek = Math.abs(currentTime_ - lastProcTime.current) > 0.8;
         lastProcTime.current = currentTime_;
@@ -869,7 +875,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       running = false;
       cancelAnimationFrame(rafId);
     };
-  }, [activeLyrics, isRich, currentTrack?.videoId]);
+  }, [activeLyrics, isRich, currentTrack?.id, (currentTrack as any)?.videoId]);
 
 
   if (!currentTrack) return null;

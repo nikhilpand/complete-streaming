@@ -11,12 +11,14 @@ import { cn } from '@/lib/utils';
 import type { SearchResultItem, Song } from '@/lib/api/types';
 
 function toSong(item: SearchResultItem): Song {
-  const parts = (item.subtitle || '').split('·').map((s) => s.trim());
+  const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
+  const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+  const albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
   return {
     id: item.id, provider: item.provider, provider_id: item.provider_id,
     type: 'song', title: item.title, subtitle: item.subtitle,
-    artists: [{ id: '', name: parts[1] || parts[0] || '', role: 'primary' }],
-    album: parts[0] || '', artwork_url: item.artwork_url, has_media: true,
+    artists: [{ id: '', name: artistName, role: 'primary' }],
+    album: albumName, artwork_url: item.artwork_url, has_media: true,
   };
 }
 

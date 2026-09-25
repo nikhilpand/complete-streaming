@@ -182,11 +182,17 @@ export class MusixmatchLyricsProvider implements ILyricsProvider {
     }
 
     if (candidateRichSync || candidateSyncedLrc) {
+      let derivedDurationMs = identity.durationMs;
+      if (candidateRichSync && candidateRichSync.length > 0) {
+        const lastLine = candidateRichSync[candidateRichSync.length - 1];
+        if (lastLine?.te) derivedDurationMs = Math.round(lastLine.te * 1000);
+      }
       candidates.push({
         providerId: this.providerId,
         providerTrackId: String(trackId),
         title: trackName,
         artists: [artistName],
+        durationMs: derivedDurationMs,
         richSync: candidateRichSync,
         syncedLyrics: candidateSyncedLrc,
         instrumental: false,

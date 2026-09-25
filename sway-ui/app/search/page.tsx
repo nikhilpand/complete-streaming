@@ -11,9 +11,9 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import type { SearchResponseData, Song, SearchResultItem } from '@/lib/api/types';
 
 function toSong(item: SearchResultItem): Song {
-  const parts = item.subtitle ? item.subtitle.split(/\s+[·•]\s+/) : [];
-  const artistName = parts.length > 1 ? parts[parts.length - 1].trim() : (item.subtitle || '');
-  const albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ').trim() : undefined;
+  const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
+  const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+  const albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
   return {
     id: item.id, provider: item.provider, provider_id: item.provider_id,
     type: 'song', title: item.title, subtitle: item.subtitle,

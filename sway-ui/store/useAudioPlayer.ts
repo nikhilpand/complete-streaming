@@ -40,7 +40,7 @@ export function useAudioPlayer() {
           title: currentTrack.title || '',
           artist: artistNames(currentTrack.artists, currentTrack.subtitle),
           thumbnail: currentTrack.artwork_url || '',
-          album: currentTrack.album || (currentTrack.subtitle?.split('·')[0]?.trim()) || '',
+          album: currentTrack.album || (currentTrack.subtitle?.split(/\s*[·•|]\s*/)[0]?.trim()) || '',
           subtitle: currentTrack.subtitle || '',
           lyricsId: currentTrack.lyrics_id,
           hasLyrics: currentTrack.has_lyrics,

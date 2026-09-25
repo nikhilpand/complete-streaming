@@ -315,9 +315,9 @@ export function LyricsSettingsPopover({
                 <div className="flex items-center gap-2">
                   <input
                     type="range"
-                    min={-500}
-                    max={500}
-                    step={50}
+                    min={-2000}
+                    max={2000}
+                    step={25}
                     value={currentOffset}
                     onChange={(e) =>
                       setTrackSyncOffset(currentTrackId, parseInt(e.target.value, 10))
@@ -335,7 +335,7 @@ export function LyricsSettingsPopover({
                   )}
                 </div>
                 <p className="text-[10px] text-white/40 leading-tight">
-                  Press [ or ] to nudge sync timing by 100ms
+                  Press [ or ] to nudge sync timing by 50ms
                 </p>
               </div>
             )}

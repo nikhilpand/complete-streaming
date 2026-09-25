@@ -20,9 +20,9 @@ const QUERIES = ['bollywood hits 2024', 'trending india', 'top hindi songs', 'ar
  * subtitle format from JioSaavn is typically "Artist · Album".
  */
 function itemToSong(item: NonNullable<SearchResponseData['songs']>[0]): Song {
-  const parts = (item.subtitle || '').split('·').map((s) => s.trim());
-  const artistName = parts[1] || parts[0] || '';
-  const albumName = parts[0] || '';
+  const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
+  const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+  const albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
   return {
     id: item.id,
     provider: item.provider,

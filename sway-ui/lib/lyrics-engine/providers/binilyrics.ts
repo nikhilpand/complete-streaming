@@ -88,6 +88,8 @@ export class BiniLyricsProvider implements ILyricsProvider {
             }));
 
             const plainText = lyrics.map((l: any) => l.text).join('\n');
+            const lastLine = richSync[richSync.length - 1];
+            const derivedDurationMs = lastLine ? Math.round(lastLine.te * 1000) : (data.metadata?.duration ? data.metadata.duration * 1000 : identity.durationMs);
 
             return [
               {
@@ -95,6 +97,7 @@ export class BiniLyricsProvider implements ILyricsProvider {
                 providerTrackId: data.metadata?.title || q.title,
                 title: data.metadata?.title || q.title,
                 artists: [q.artist],
+                durationMs: derivedDurationMs,
                 richSync,
                 plainLyrics: plainText,
                 instrumental: false,
@@ -115,12 +118,16 @@ export class BiniLyricsProvider implements ILyricsProvider {
               })
               .join('\n');
 
+            const lastLine = lyrics[lyrics.length - 1];
+            const derivedDurationMs = lastLine?.time ? Math.round(lastLine.time + 3000) : (data.metadata?.duration ? data.metadata.duration * 1000 : identity.durationMs);
+
             return [
               {
                 providerId: 'binilyrics',
                 providerTrackId: data.metadata?.title || q.title,
                 title: data.metadata?.title || q.title,
                 artists: [q.artist],
+                durationMs: derivedDurationMs,
                 syncedLyrics: lrcLines,
                 plainLyrics: lyrics.map((l: any) => l.text).join('\n'),
                 instrumental: false,

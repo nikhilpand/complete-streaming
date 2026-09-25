@@ -231,17 +231,24 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
 
   // 5. Select Best Candidate (Section 1 & 9)
   // Tie-breaker:
-  // Preference 1: AUTO_ACCEPT over CORROBORATED_ACCEPT over FALLBACK_ONLY
-  // Preference 2: Genuine WORD sync (richsync) over LINE sync (lrc) over PLAIN
+  // Preference 1: Genuine WORD sync (richsync) with valid corroboration (>= 0.70) over LINE sync over PLAIN
+  // Preference 2: AUTO_ACCEPT over CORROBORATED_ACCEPT over FALLBACK_ONLY
   // Preference 3: Highest totalScore
   scoredCandidates.sort((a, b) => {
+    const getSyncTier = (c: LyricsCandidate, s: MatchScoreBreakdown) => {
+      // Real word sync with acceptable match score is gold standard
+      if (c.richSync && c.richSync.length >= 3 && s.totalScore >= 0.70) return 3;
+      // Line sync with good confidence
+      if (c.syncedLyrics && s.totalScore >= 0.65) return 2;
+      return 1;
+    };
+
+    const syncTierDiff = getSyncTier(b.candidate, b.score) - getSyncTier(a.candidate, a.score);
+    if (syncTierDiff !== 0) return syncTierDiff;
+
     const rankOrder = { AUTO_ACCEPT: 3, CORROBORATED_ACCEPT: 2, FALLBACK_ONLY: 1, REJECT: 0 };
     const decisionDiff = rankOrder[b.decision] - rankOrder[a.decision];
     if (decisionDiff !== 0) return decisionDiff;
-
-    const getSyncWeight = (c: LyricsCandidate) => (c.richSync ? 3 : c.syncedLyrics ? 2 : 1);
-    const syncDiff = getSyncWeight(b.candidate) - getSyncWeight(a.candidate);
-    if (syncDiff !== 0) return syncDiff;
 
     return b.score.totalScore - a.score.totalScore;
   });
