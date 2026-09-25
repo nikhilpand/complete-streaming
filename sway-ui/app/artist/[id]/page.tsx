@@ -39,9 +39,9 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
     <div>
       {/* Hero */}
       <div className="relative h-72 md:h-80 bg-[--surface-elevated] overflow-hidden">
-        {artist?.image_url && (
+        {artist?.image_url && artUrl(artist.image_url) ? (
           <img src={artUrl(artist.image_url)} alt={artist.name} className="w-full h-full object-cover object-top opacity-50" />
-        )}
+        ) : null}
         <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 30%, var(--surface))' }} />
         <div className="absolute bottom-0 left-0 right-0 px-6 pb-6">
           {loading ? (

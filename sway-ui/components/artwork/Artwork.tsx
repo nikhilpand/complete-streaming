@@ -4,7 +4,7 @@ import { Music2 } from 'lucide-react';
 import { cn, artUrl } from '@/lib/utils';
 
 interface Props {
-  src?: string;
+  src?: string | null;
   alt: string;
   size?: number;
   className?: string;
@@ -13,9 +13,9 @@ interface Props {
 
 export function Artwork({ src, alt, size = 48, className }: Props) {
   const [err, setErr] = useState(false);
-  const url = artUrl(src);
+  const url = src ? artUrl(src) : '';
 
-  if (!url || err) {
+  if (!url || !url.trim() || err) {
     return (
       <div
         className={cn('bg-[--surface-elevated] flex items-center justify-center text-[--muted] flex-shrink-0', className)}
@@ -37,7 +37,6 @@ export function Artwork({ src, alt, size = 48, className }: Props) {
       onError={() => setErr(true)}
       className={cn('object-cover flex-shrink-0', className)}
       style={{ width: size, height: size }}
-      crossOrigin="anonymous"
     />
   );
 }

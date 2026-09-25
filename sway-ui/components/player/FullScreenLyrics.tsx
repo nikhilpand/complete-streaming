@@ -115,6 +115,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       title: rawTrack.title || '',
       artist: artistNames(rawTrack.artists, rawTrack.subtitle),
       thumbnail: rawTrack.artwork_url || '',
+      artwork_url: rawTrack.artwork_url || '',
       album: rawTrack.album || (rawTrack.subtitle?.split(/\s*[·•|]\s*/)[0]?.trim()) || '',
       subtitle: rawTrack.subtitle || '',
       lyricsId: rawTrack.lyrics_id,
@@ -270,7 +271,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const targetScrollY   = useRef(0);
   const isInitialPositionSet = useRef(false);
 
-  const coverUrl = currentTrack?.thumbnail ? getProxiedImageUrl(currentTrack.thumbnail, 500, 500) : '';
+  const rawCover = currentTrack?.artwork_url || currentTrack?.thumbnail;
+  const coverUrl = rawCover ? getProxiedImageUrl(rawCover, 500, 500) : '';
 
   // Authentic timing contract: word sweeping is active ONLY for verified WORD/SYLLABLE sync
   const isRich = useMemo(() => {
@@ -812,7 +814,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="album-art shrink-0 overflow-hidden relative group"
         >
-          {coverUrl ? (
+          {coverUrl && coverUrl.trim() ? (
             <img src={coverUrl} alt={currentTrack.title} className="w-full h-full object-cover select-none" draggable={false} />
           ) : (
             <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
@@ -1083,8 +1085,12 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
                   Now Playing
                 </span>
                 <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/10 border border-white/15">
-                  {coverUrl && (
+                  {coverUrl && coverUrl.trim() ? (
                     <img src={coverUrl} alt={currentTrack.title} className="w-10 h-10 rounded-lg object-cover" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
+                      <Music2 className="w-4 h-4 text-white/30" />
+                    </div>
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-white truncate">{currentTrack.title}</p>

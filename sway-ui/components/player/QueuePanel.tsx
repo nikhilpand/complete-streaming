@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ListMusic, Music2 } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
+import { Artwork } from '@/components/artwork/Artwork';
 import { artUrl, artistNames, formatMs, cn } from '@/lib/utils';
 
 export function QueuePanel() {
@@ -152,13 +153,7 @@ function QueueRow({
     >
       {/* Artwork */}
       <div className="relative w-9 h-9 rounded-[--radius-xs] overflow-hidden flex-shrink-0 bg-white/[0.07]">
-        {song.artwork_url ? (
-          <img src={artUrl(song.artwork_url)} alt={song.title} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <Music2 className="w-4 h-4 text-white/20" />
-          </div>
-        )}
+        <Artwork src={song.artwork_url} alt={song.title} size={36} className="w-full h-full object-cover" />
         {isActive && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40">
             <span className="flex gap-0.5">

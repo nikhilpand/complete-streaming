@@ -5,6 +5,7 @@ import { Play, Shuffle, Clock } from 'lucide-react';
 import { getPlaylist } from '@/lib/api/playlists';
 import { usePlayerStore } from '@/store/playerStore';
 import { SongRow } from '@/components/music/SongRow';
+import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { artUrl, formatCount } from '@/lib/utils';
@@ -46,7 +47,7 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
         ) : playlist ? (
           <>
             <div className="w-52 h-52 rounded-[--radius-2xl] overflow-hidden flex-shrink-0 shadow-2xl bg-[--surface-elevated]">
-              <img src={artUrl(playlist.artwork_url)} alt={playlist.title} className="w-full h-full object-cover" />
+              <Artwork src={playlist.artwork_url} alt={playlist.title} size={208} className="w-full h-full object-cover" />
             </div>
             <div className="min-w-0 space-y-2">
               <p className="text-[10px] text-[--muted] uppercase tracking-widest font-mono">Playlist</p>

@@ -5,6 +5,7 @@ import { Play, Shuffle, Clock } from 'lucide-react';
 import { getAlbum } from '@/lib/api/albums';
 import { usePlayerStore } from '@/store/playerStore';
 import { SongRow } from '@/components/music/SongRow';
+import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { artUrl } from '@/lib/utils';
@@ -58,7 +59,7 @@ export default function AlbumPage({ params }: { params: Promise<{ id: string }> 
         ) : album ? (
           <>
             <div className="w-52 h-52 rounded-[--radius-2xl] overflow-hidden flex-shrink-0 shadow-2xl bg-[--surface-elevated]">
-              <img src={artUrl(album.artwork_url)} alt={album.title} className="w-full h-full object-cover" />
+              <Artwork src={album.artwork_url} alt={album.title} size={208} className="w-full h-full object-cover" />
             </div>
             <div className="min-w-0 space-y-2">
               <p className="text-[10px] text-[--muted] uppercase tracking-widest font-mono">Album</p>

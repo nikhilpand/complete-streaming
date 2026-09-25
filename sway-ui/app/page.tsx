@@ -5,6 +5,7 @@ import { getHomeFeed, type HomeShelfData } from '@/lib/api/home';
 import { usePlayerStore } from '@/store/playerStore';
 import { SongRow } from '@/components/music/SongRow';
 import { HorizontalShelf } from '@/components/music/HorizontalShelf';
+import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { artUrl, artistNames } from '@/lib/utils';
@@ -70,9 +71,10 @@ export default function HomePage() {
       ) : featured ? (
         <div className="flex gap-8 items-end">
           <div className="relative w-52 h-52 rounded-[--radius-2xl] overflow-hidden flex-shrink-0 shadow-2xl">
-            <img
-              src={artUrl(featured.artwork_url)}
+            <Artwork
+              src={featured.artwork_url}
               alt={featured.title}
+              size={208}
               className="w-full h-full object-cover"
             />
           </div>
@@ -176,9 +178,10 @@ export default function HomePage() {
                     }}
                   >
                     <div className="relative aspect-square overflow-hidden rounded-[--radius-lg] bg-[--surface-elevated] mb-3">
-                      <img
-                        src={artUrl(item.artwork_url)}
+                      <Artwork
+                        src={item.artwork_url}
                         alt={item.title}
+                        size={180}
                         className="w-full h-full object-cover transition-transform duration-[--motion-slow] group-hover:scale-105"
                       />
                     </div>

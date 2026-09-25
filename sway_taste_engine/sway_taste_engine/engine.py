@@ -26,7 +26,11 @@ class RecommendationEngine:
         ok=self.store.add_event(event)
         if ok:self.rebuild_profile(event.user_id)
         return ok
-    def rebuild_profile(self,user_id):self.store.save_profile(self.profile_builder.build(user_id,self.store.user_events(user_id),self.store.tracks))
+    def rebuild_profile(self, user_id):
+        catalog = getattr(self.store, "tracks", None)
+        if catalog is None or not isinstance(catalog, dict):
+            catalog = {t.id: t for t in self.store.all_tracks()}
+        self.store.save_profile(self.profile_builder.build(user_id, self.store.user_events(user_id), catalog))
     def seed_catalog(self,tracks):self.store.upsert_tracks(tracks)
     def _explanation(self,c):
         labels={"recent":"Based on your recent listening","affinity":"From an artist you listen to","similar_track":"Similar to a track you played","similar_artist":"From a related artist","discovery":"A discovery near your taste","new_release":"A new release near your taste","trending":"Trending music that matches your taste","session":"Fits your current listening session"}; typ={"recent":"recent","affinity":"artist_affinity","similar_track":"similar_track","similar_artist":"similar_artist","discovery":"discovery","new_release":"new_release","trending":"personalized_trending","session":"session"}.get(c.source,"recommendation")

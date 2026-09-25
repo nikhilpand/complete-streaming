@@ -145,6 +145,7 @@ EVENT_MAP = {
 
 
 @router.post("/events")
+@router.post("/recommendations/events")
 def post_event(e: EventIn):
     """Log user playback telemetry and update taste profile in real-time."""
     eng = get_taste_engine()

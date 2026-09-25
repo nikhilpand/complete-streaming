@@ -382,6 +382,10 @@ class SQLiteTasteStore(TasteStore):
             rows = conn.execute("SELECT data_json FROM tracks;").fetchall()
             return [Track.model_validate_json(r["data_json"]) for r in rows]
 
+    @property
+    def tracks(self) -> dict[str, Track]:
+        return {t.id: t for t in self.all_tracks()}
+
     def add_event(self, event: UserEvent) -> bool:
         ts_str = event.timestamp.isoformat()
         data_json = event.model_dump_json()
