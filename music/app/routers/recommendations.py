@@ -27,8 +27,10 @@ taste_engine_dir = repo_root / "sway_taste_engine"
 if str(taste_engine_dir) not in sys.path:
     sys.path.insert(0, str(taste_engine_dir))
 
+from app.services.candidate_builder import CandidateBuilder
 from sway_taste_engine.engine import RecommendationEngine
 from sway_taste_engine.metadata import extract_track_features, clean_track_id
+from sway_taste_engine.storage import SQLiteTasteStore
 from sway_taste_engine.models import (
     EventType,
     FeedType,
@@ -89,7 +91,8 @@ def get_db():
 def get_taste_engine() -> RecommendationEngine:
     global _taste_engine
     if _taste_engine is None:
-        _taste_engine = RecommendationEngine()
+        store = SQLiteTasteStore(str(DB_PATH))
+        _taste_engine = RecommendationEngine(store=store)
     return _taste_engine
 
 
@@ -226,41 +229,24 @@ async def get_recommendations(
 
     provider = getattr(request.app.state, "provider", None)
 
-    # Hydrate real tracks dynamically from JioSaavn provider
+    # Hydrate real tracks dynamically via CandidateBuilder
     if provider:
-        search_queries: List[str] = []
+        curr_song = None
         if curr_id:
             try:
                 curr_song = await provider.get_song(curr_id)
                 if curr_song:
                     seed_track = song_to_engine_track(curr_song)
                     eng.seed_catalog([seed_track])
-                    if curr_song.artists:
-                        search_queries.append(curr_song.artists[0].name)
-                    if curr_song.title:
-                        search_queries.append(f"{curr_song.title} song")
             except Exception as ex:
                 logger.debug("Could not fetch current song %s for seed: %s", curr_id, ex)
 
-        if not search_queries:
-            search_queries = ["trending hindi songs", "arijit singh top hits", "punjabi hits 2024"]
-
-        # Run candidate searches concurrently
-        async def fetch_query(q: str):
-            try:
-                res = await provider.search(q, n=15)
-                return res.songs or []
-            except Exception as e:
-                logger.debug("Provider search failed for query %s: %s", q, e)
-                return []
-
-        search_results = await asyncio.gather(*(fetch_query(q) for q in search_queries[:3]))
-        discovered_tracks: List[Track] = []
-        for song_list in search_results:
-            for s in song_list:
-                t = song_to_engine_track(s)
-                discovered_tracks.append(t)
-
+        builder = CandidateBuilder(provider=provider, taste_store=eng.store)
+        profile = eng.store.get_profile(target_uid)
+        discovered_tracks, attribution = await builder.build_candidates(
+            seed_song=curr_song,
+            profile=profile,
+        )
         if discovered_tracks:
             eng.seed_catalog(discovered_tracks)
 
