@@ -2,14 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { getHomeFeed, type HomeShelfData } from '@/lib/api/home';
-import { search } from '@/lib/api/search';
 import { usePlayerStore } from '@/store/playerStore';
 import { SongRow } from '@/components/music/SongRow';
 import { HorizontalShelf } from '@/components/music/HorizontalShelf';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { artUrl, artistNames } from '@/lib/utils';
-import type { Song, SearchResponseData } from '@/lib/api/types';
+import type { Song } from '@/lib/api/types';
 
 export default function HomePage() {
   const [shelves, setShelves] = useState<HomeShelfData[]>([]);
@@ -28,38 +27,10 @@ export default function HomePage() {
         setShelves(feed.shelves);
         return;
       }
-    } catch {
-      // Fallback to search query if home feed is temporarily unavailable
-      try {
-        const r = await search('top bollywood hits', 20, 1, true, signal);
-        if (r && r.songs) {
-          const fallbackSongs: Song[] = r.songs.map((s) => ({
-            id: s.id,
-            provider: s.provider,
-            provider_id: s.provider_id,
-            type: 'song',
-            title: s.title,
-            subtitle: s.subtitle,
-            artists: [{ id: '', name: s.subtitle || 'Artist', role: 'primary' }],
-            artwork_url: s.artwork_url,
-            has_media: true,
-          }));
-          setShelves([
-            {
-              id: 'fallback_quick_mix',
-              type: 'quick_mix',
-              title: 'Trending Music',
-              subtitle: 'Popular hits right now',
-              badge: 'Trending',
-              items: fallbackSongs,
-            },
-          ]);
-          return;
-        }
-      } catch (err: unknown) {
-        if ((err as Error)?.name === 'AbortError') return;
-      }
-      setError('Couldn\'t load content. Make sure the SWAY backend is running at http://localhost:8000');
+      throw new Error('No shelves returned');
+    } catch (e: unknown) {
+      if ((e as Error)?.name === 'AbortError') return;
+      setError('Couldn’t load content. Please try again.');
     } finally {
       if (!signal?.aborted) setLoading(false);
     }

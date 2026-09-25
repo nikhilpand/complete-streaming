@@ -8,40 +8,8 @@ import { AlbumCard } from '@/components/music/AlbumCard';
 import { ArtistCard } from '@/components/music/ArtistCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { searchItemToSong } from '@/lib/utils';
 import type { SearchResponseData, Song, SearchResultItem } from '@/lib/api/types';
-
-function toSong(item: SearchResultItem): Song {
-  let artists: { id: string; name: string; role: string }[] = [];
-  let albumName: string | undefined;
-
-  if (item.provider === 'youtube') {
-    artists = (item.subtitle || 'YouTube Music')
-      .split(',')
-      .map((name) => ({ id: '', name: name.trim(), role: 'primary' }))
-      .filter((a) => a.name.length > 0);
-    albumName = item.extra?.album;
-  } else {
-    const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
-    const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
-    artists = [{ id: '', name: artistName, role: 'primary' }];
-    albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
-  }
-
-  return {
-    id: item.id,
-    provider: item.provider,
-    provider_id: item.provider_id,
-    type: 'song',
-    title: item.title,
-    subtitle: item.subtitle,
-    artists: artists.length > 0 ? artists : [{ id: '', name: 'Artist', role: 'primary' }],
-    album: albumName,
-    duration_ms: item.extra?.duration_ms,
-    artwork_url: item.artwork_url,
-    is_explicit: Boolean(item.extra?.is_explicit),
-    has_media: true,
-  };
-}
 
 type Tab = 'all' | 'songs' | 'artists' | 'albums';
 
@@ -100,7 +68,7 @@ export default function SearchPage() {
   });
 
   // Preserve the exact ranking and full list of songs
-  const songObjects: Song[] = songs.map((s) => enrichedMap.get(s.id) || enrichedMap.get(s.provider_id) || toSong(s));
+  const songObjects: Song[] = songs.map((s) => enrichedMap.get(s.id) || enrichedMap.get(s.provider_id) || searchItemToSong(s));
 
 
   const TABS: { key: Tab; label: string }[] = [

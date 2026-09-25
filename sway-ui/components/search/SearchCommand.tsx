@@ -6,41 +6,8 @@ import { search } from '@/lib/api/search';
 import { usePlayerStore } from '@/store/playerStore';
 import { Artwork } from '@/components/artwork/Artwork';
 import Link from 'next/link';
-import { cn } from '@/lib/utils';
+import { cn, searchItemToSong } from '@/lib/utils';
 import type { SearchResultItem, Song } from '@/lib/api/types';
-
-function toSong(item: SearchResultItem): Song {
-  let artists: { id: string; name: string; role: string }[] = [];
-  let albumName: string | undefined;
-
-  if (item.provider === 'youtube') {
-    artists = (item.subtitle || 'YouTube Music')
-      .split(',')
-      .map((name) => ({ id: '', name: name.trim(), role: 'primary' }))
-      .filter((a) => a.name.length > 0);
-    albumName = item.extra?.album;
-  } else {
-    const parts = (item.subtitle || '').split(/\s*[·•|]\s*/).map((s) => s.trim()).filter(Boolean);
-    const artistName = parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
-    artists = [{ id: '', name: artistName, role: 'primary' }];
-    albumName = parts.length > 1 ? parts.slice(0, -1).join(' · ') : undefined;
-  }
-
-  return {
-    id: item.id,
-    provider: item.provider,
-    provider_id: item.provider_id,
-    type: 'song',
-    title: item.title,
-    subtitle: item.subtitle,
-    artists: artists.length > 0 ? artists : [{ id: '', name: 'Artist', role: 'primary' }],
-    album: albumName,
-    duration_ms: item.extra?.duration_ms,
-    artwork_url: item.artwork_url,
-    is_explicit: Boolean(item.extra?.is_explicit),
-    has_media: true,
-  };
-}
 
 export function SearchCommand() {
   const [open, setOpen] = useState(false);
@@ -150,7 +117,7 @@ export function SearchCommand() {
                           className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors text-left"
                           onClick={() => {
                             // Prefer enriched Song (with proper artists, lyrics_id, duration_ms)
-                            const song = enrichedMap.get(item.id) ?? toSong(item);
+                            const song = enrichedMap.get(item.id) ?? searchItemToSong(item);
                             usePlayerStore.getState().setCurrentTrack(song);
                             setOpen(false);
                           }}
