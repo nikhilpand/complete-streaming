@@ -80,8 +80,43 @@ export const usePlayerStore = create<PlayerStore>()(
       } else {
         next = queueIndex + 1;
         if (next >= queue.length) {
-          if (repeatMode === 'all') next = 0;
-          else { set({ status: 'idle' }); return; }
+          if (repeatMode === 'all') {
+            next = 0;
+          } else {
+            const lastTrack = get().currentTrack;
+            if (lastTrack?.id) {
+              set({ status: 'loading' });
+              import('@/lib/api/queue')
+                .then(async ({ getNextQueue, queueTrackToSong }) => {
+                  try {
+                    const tracks = await getNextQueue(lastTrack.id, 5);
+                    if (tracks && tracks.length > 0) {
+                      const newSongs = tracks.map(queueTrackToSong);
+                      const currentQ = get().queue;
+                      const updatedQueue = [...currentQ, ...newSongs];
+                      const nextIndex = currentQ.length;
+                      set({
+                        queue: updatedQueue,
+                        queueIndex: nextIndex,
+                        currentTrack: updatedQueue[nextIndex],
+                        status: 'loading',
+                        error: null,
+                      });
+                      return;
+                    }
+                  } catch {
+                    // Fall through to idle
+                  }
+                  set({ status: 'idle' });
+                })
+                .catch(() => {
+                  set({ status: 'idle' });
+                });
+              return;
+            }
+            set({ status: 'idle' });
+            return;
+          }
         }
       }
       set({ queueIndex: next, currentTrack: queue[next], error: null, status: 'loading' });

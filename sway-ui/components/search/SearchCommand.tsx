@@ -165,8 +165,25 @@ export function SearchCommand() {
                       ))}
                     </div>
                   )}
+                  {/* Playlists */}
+                  {(results.playlists?.length ?? 0) > 0 && (
+                    <div className="py-2 border-t border-white/[0.04]">
+                      <p className="text-[10px] font-semibold text-[--muted] uppercase tracking-widest px-4 py-1.5">Playlists</p>
+                      {results.playlists!.slice(0, 3).map((item, idx) => (
+                        <Link key={`${item.id}-${idx}`} href={`/playlist/${item.id}`} onClick={() => setOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors"
+                        >
+                          <Artwork src={item.artwork_url} alt={item.title} size={36} className="rounded-[--radius-xs]" />
+                          <div>
+                            <p className="text-sm text-[--foreground]">{item.title}</p>
+                            <p className="text-xs text-[--muted]">{item.subtitle}</p>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                   {/* Nothing */}
-                  {!results.songs?.length && !results.artists?.length && !results.albums?.length && (
+                  {!results.songs?.length && !results.artists?.length && !results.albums?.length && !results.playlists?.length && (
                     <div className="py-12 text-center text-[--muted] text-sm">No results for &ldquo;{query}&rdquo;</div>
                   )}
                 </div>

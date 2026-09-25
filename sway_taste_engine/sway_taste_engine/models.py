@@ -221,6 +221,10 @@ class HorizonTasteState(BaseModel):
     def genre_affinity(self) -> dict[str, float]:
         return {k: b.net for k, b in self.genre.items()}
 
+    @property
+    def mood_affinity(self) -> dict[str, float]:
+        return {k: b.net for k, b in self.mood.items()}
+
 
 class SessionTasteState(BaseModel):
     """Immediate listening context within the active session."""
@@ -277,6 +281,14 @@ class UserTasteProfile(BaseModel):
     @property
     def mood(self) -> dict[str, Bucket]:
         return self.recent_30d.mood
+
+    @property
+    def mood_affinity(self) -> dict[str, float]:
+        return self.recent_30d.mood_affinity
+
+    @property
+    def total_plays(self) -> int:
+        return self.total_events
 
     @property
     def track(self) -> dict[str, Bucket]:

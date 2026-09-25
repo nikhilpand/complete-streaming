@@ -127,3 +127,45 @@ export interface ApiResponse<T> {
   error?: string;
   error_code?: string;
 }
+
+export interface QueueTrack {
+  id: string;
+  title: string;
+  artist_name: string;
+  artists?: ArtistSummary[];
+  album?: string;
+  year?: number;
+  language?: string;
+  artwork_url?: string;
+  energy?: number;
+  popularity?: number;
+}
+
+export interface QueueNextResponse {
+  current_track_id: string;
+  queue: QueueTrack[];
+  count: number;
+}
+
+export interface RecommendationTrack {
+  id: string;
+  title: string;
+  artist: string;
+  album?: string;
+  artwork_url?: string;
+  genre?: string;
+  mood?: string;
+  score?: number;
+  source?: string;
+  explanation?: string;
+  badge?: string;
+}
+
+export interface UserTasteProfile {
+  user_id: string;
+  archetype: string;
+  top_genres: string[];
+  top_artists: string[];
+  top_moods: string[];
+  play_count: number;
+}

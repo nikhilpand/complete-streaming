@@ -1,10 +1,12 @@
 'use client';
-import { useCallback } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ListMusic, Music2 } from 'lucide-react';
+import { X, ListMusic, Music2, Sparkles, Plus } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
 import { Artwork } from '@/components/artwork/Artwork';
 import { artUrl, artistNames, formatMs, cn } from '@/lib/utils';
+import { getNextQueue, queueTrackToSong } from '@/lib/api/queue';
+import type { QueueTrack } from '@/lib/api/types';
 
 export function QueuePanel() {
   const isOpen = usePlayerStore((s) => s.isQueueOpen);
@@ -12,6 +14,31 @@ export function QueuePanel() {
   const queueIndex = usePlayerStore((s) => s.queueIndex);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const toggleQueue = usePlayerStore((s) => s.toggleQueue);
+
+  const [autoplayTracks, setAutoplayTracks] = useState<QueueTrack[]>([]);
+  const [loadingAutoplay, setLoadingAutoplay] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !currentTrack?.id) {
+      setAutoplayTracks([]);
+      return;
+    }
+    const ac = new AbortController();
+    setLoadingAutoplay(true);
+    getNextQueue(currentTrack.id, 6, ac.signal)
+      .then((tracks) => {
+        if (!ac.signal.aborted) {
+          const queueIds = new Set(queue.map((q) => q.id));
+          const filtered = tracks.filter((t) => !queueIds.has(t.id) && t.id !== currentTrack.id);
+          setAutoplayTracks(filtered);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!ac.signal.aborted) setLoadingAutoplay(false);
+      });
+    return () => ac.abort();
+  }, [isOpen, currentTrack?.id, queue]);
 
   const playAt = useCallback((index: number) => {
     const song = queue[index];
@@ -101,6 +128,63 @@ export function QueuePanel() {
                           />
                         );
                       })}
+                    </div>
+                  )}
+
+                  {/* Recommended Continuation */}
+                  {autoplayTracks.length > 0 && (
+                    <div className="px-4 mt-5">
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles className="w-3 h-3 text-[--art-accent]" />
+                          <p className="text-[10px] font-mono text-[--art-accent] uppercase tracking-widest">
+                            Autoplay Next
+                          </p>
+                        </div>
+                        <span className="text-[9px] font-mono text-[--muted] uppercase tracking-wider">AI Sequenced</span>
+                      </div>
+                      <div className="space-y-1">
+                        {autoplayTracks.map((track) => (
+                          <div
+                            key={track.id}
+                            className="group/auto flex items-center justify-between p-1.5 rounded-[--radius-sm] hover:bg-white/[0.05] transition-colors"
+                          >
+                            <button
+                              onClick={() => {
+                                const song = queueTrackToSong(track);
+                                const updated = [...queue, song];
+                                usePlayerStore.getState().setQueue(updated, updated.length - 1);
+                                usePlayerStore.getState().setCurrentTrack(song);
+                              }}
+                              className="flex items-center gap-2.5 flex-1 min-w-0 text-left cursor-pointer"
+                            >
+                              <div className="w-8 h-8 rounded-[--radius-xs] overflow-hidden flex-shrink-0 bg-white/[0.07]">
+                                <Artwork src={track.artwork_url} alt={track.title} size={32} className="w-full h-full object-cover" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-[--foreground] truncate group-hover/auto:text-[--art-accent] transition-colors">
+                                  {track.title}
+                                </p>
+                                <p className="text-[10px] text-[--muted] truncate">
+                                  {track.artist_name || (track.artists && track.artists[0]?.name) || 'Unknown Artist'}
+                                </p>
+                              </div>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const song = queueTrackToSong(track);
+                                usePlayerStore.getState().addToQueue(song);
+                                setAutoplayTracks((prev) => prev.filter((t) => t.id !== track.id));
+                              }}
+                              title="Add to queue"
+                              className="p-1 text-[--muted] hover:text-[--foreground] opacity-60 group-hover/auto:opacity-100 transition cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 

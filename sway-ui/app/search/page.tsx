@@ -6,12 +6,13 @@ import { usePlayerStore } from '@/store/playerStore';
 import { SongRow } from '@/components/music/SongRow';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { ArtistCard } from '@/components/music/ArtistCard';
+import { PlaylistCard } from '@/components/music/PlaylistCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { searchItemToSong } from '@/lib/utils';
 import type { SearchResponseData, Song, SearchResultItem } from '@/lib/api/types';
 
-type Tab = 'all' | 'songs' | 'artists' | 'albums';
+type Tab = 'all' | 'songs' | 'artists' | 'albums' | 'playlists';
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
@@ -59,6 +60,7 @@ export default function SearchPage() {
   const songs = results?.songs ?? [];
   const artists = results?.artists ?? [];
   const albums = results?.albums ?? [];
+  const playlists = results?.playlists ?? [];
 
   // Map enriched songs by ID for fast lookup
   const enrichedMap = new Map<string, Song>();
@@ -70,10 +72,12 @@ export default function SearchPage() {
   // Preserve the exact ranking and full list of songs
   const songObjects: Song[] = songs.map((s) => enrichedMap.get(s.id) || enrichedMap.get(s.provider_id) || searchItemToSong(s));
 
-
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'all', label: 'All' }, { key: 'songs', label: 'Songs' },
-    { key: 'artists', label: 'Artists' }, { key: 'albums', label: 'Albums' },
+    { key: 'all', label: 'All' },
+    { key: 'songs', label: 'Songs' },
+    { key: 'artists', label: 'Artists' },
+    { key: 'albums', label: 'Albums' },
+    { key: 'playlists', label: 'Playlists' },
   ];
 
   return (
@@ -123,7 +127,7 @@ export default function SearchPage() {
 
       {/* Empty */}
       {!loading && !query && <EmptyState icon={<SearchIcon className="w-10 h-10" />} title="Search for anything" description="Songs, artists, albums, playlists" />}
-      {!loading && query && results && !songs.length && !artists.length && !albums.length && (
+      {!loading && query && results && !songs.length && !artists.length && !albums.length && !playlists.length && (
         <EmptyState title={`No results for "${query}"`} description="Try a different search term" />
       )}
 
@@ -149,6 +153,16 @@ export default function SearchPage() {
               <h2 className="text-base font-semibold text-[--foreground] mb-4 px-1">Albums</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {albums.map((a, i) => <AlbumCard key={`${a.id}-${i}`} id={a.id} title={a.title} subtitle={a.subtitle} artwork_url={a.artwork_url} />)}
+              </div>
+            </section>
+          )}
+          {(tab === 'all' || tab === 'playlists') && playlists.length > 0 && (
+            <section>
+              <h2 className="text-base font-semibold text-[--foreground] mb-4 px-1">Playlists</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {playlists.map((p, i) => (
+                  <PlaylistCard key={`${p.id}-${i}`} id={p.id} title={p.title} subtitle={p.subtitle} artwork_url={p.artwork_url} />
+                ))}
               </div>
             </section>
           )}
