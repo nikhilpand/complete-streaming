@@ -221,6 +221,7 @@ class SQLiteTasteStore(TasteStore):
     def __init__(self, db_path: str = "music_recs.db", timeout: float = 5.0) -> None:
         self.db_path = db_path
         self.timeout = timeout
+        self._catalog_cache: dict[str, Track] | None = None
         self._init_db()
 
     @contextmanager
@@ -339,6 +340,9 @@ class SQLiteTasteStore(TasteStore):
     def upsert_tracks(self, tracks: list[Track]) -> None:
         if not tracks:
             return
+        if self._catalog_cache is not None:
+            for t in tracks:
+                self._catalog_cache[t.id] = t
         rows = [
             (
                 t.id,
@@ -369,22 +373,33 @@ class SQLiteTasteStore(TasteStore):
             )
 
     def get_track(self, track_id: str) -> Track | None:
+        if self._catalog_cache is not None and track_id in self._catalog_cache:
+            return self._catalog_cache[track_id]
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT data_json FROM tracks WHERE id = ?;", (track_id,)
             ).fetchone()
             if not row:
                 return None
-            return Track.model_validate_json(row["data_json"])
+            track = Track.model_validate_json(row["data_json"])
+            if self._catalog_cache is not None:
+                self._catalog_cache[track_id] = track
+            return track
 
     def all_tracks(self) -> list[Track]:
+        if self._catalog_cache is not None:
+            return list(self._catalog_cache.values())
         with self._connect() as conn:
             rows = conn.execute("SELECT data_json FROM tracks;").fetchall()
-            return [Track.model_validate_json(r["data_json"]) for r in rows]
+            tracks = [Track.model_validate_json(r["data_json"]) for r in rows]
+            self._catalog_cache = {t.id: t for t in tracks}
+            return tracks
 
     @property
     def tracks(self) -> dict[str, Track]:
-        return {t.id: t for t in self.all_tracks()}
+        if self._catalog_cache is None:
+            self.all_tracks()
+        return self._catalog_cache or {}
 
     def add_event(self, event: UserEvent) -> bool:
         ts_str = event.timestamp.isoformat()

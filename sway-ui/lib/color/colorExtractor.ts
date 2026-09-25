@@ -44,6 +44,7 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
 }
 
 export async function extractPalette(imageUrl: string): Promise<Palette> {
+  if (!imageUrl || !imageUrl.trim()) return defaultPalette();
   if (cache.has(imageUrl)) return cache.get(imageUrl)!;
   const f = getFac();
   if (!f) return defaultPalette();
@@ -69,6 +70,7 @@ function defaultPalette(): Palette {
 }
 
 export function applyPalette(p: Palette) {
+  if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.style.setProperty('--art-primary', p.primary);
   root.style.setProperty('--art-secondary', `rgba(${p.r},${p.g},${p.b},0.7)`);
@@ -77,6 +79,7 @@ export function applyPalette(p: Palette) {
   root.style.setProperty('--art-h', String(p.h));
   root.style.setProperty('--art-s', `${Math.max(20, p.s)}%`);
   root.style.setProperty('--art-l', `${p.l}%`);
+  root.style.setProperty('--art-bg-main', `hsl(${p.h}, ${Math.min(30, p.s)}%, 7%)`);
 }
 
 export function scheduleExtract(url: string, done: (p: Palette) => void) {

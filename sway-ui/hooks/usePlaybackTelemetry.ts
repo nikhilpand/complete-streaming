@@ -56,7 +56,7 @@ export function usePlaybackTelemetry(userId: string = 'guest_user') {
       const album = customTrack?.album ?? trackAlbum ?? 'Single';
 
       try {
-        await fetch('/api/proxy/events', {
+        await fetch('/api/proxy/recommendations/events', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

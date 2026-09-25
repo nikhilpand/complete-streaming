@@ -12,17 +12,32 @@ interface Props {
 }
 
 export function Artwork({ src, alt, size = 48, className }: Props) {
+  const [lastSrc, setLastSrc] = useState(src);
   const [err, setErr] = useState(false);
+
+  if (src !== lastSrc) {
+    setLastSrc(src);
+    setErr(false);
+  }
+
   const url = src ? artUrl(src) : '';
 
+  const hasExplicitWidth = className?.includes('w-');
+  const hasExplicitHeight = className?.includes('h-');
+  const dimensionStyle = {
+    width: hasExplicitWidth ? undefined : size,
+    height: hasExplicitHeight ? undefined : size,
+  };
+
   if (!url || !url.trim() || err) {
+    const iconSize = Math.max(14, Math.min(Math.round(size * 0.35), 48));
     return (
       <div
         className={cn('bg-[--surface-elevated] flex items-center justify-center text-[--muted] flex-shrink-0', className)}
-        style={{ width: size, height: size }}
+        style={dimensionStyle}
         aria-label={alt}
       >
-        <Music2 style={{ width: size * 0.35, height: size * 0.35 }} />
+        <Music2 style={{ width: iconSize, height: iconSize }} />
       </div>
     );
   }
@@ -36,7 +51,7 @@ export function Artwork({ src, alt, size = 48, className }: Props) {
       height={size}
       onError={() => setErr(true)}
       className={cn('object-cover flex-shrink-0', className)}
-      style={{ width: size, height: size }}
+      style={dimensionStyle}
     />
   );
 }

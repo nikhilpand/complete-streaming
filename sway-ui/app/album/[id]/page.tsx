@@ -8,7 +8,6 @@ import { SongRow } from '@/components/music/SongRow';
 import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { artUrl } from '@/lib/utils';
 import type { Album } from '@/lib/api/types';
 
 export default function AlbumPage({ params }: { params: Promise<{ id: string }> }) {

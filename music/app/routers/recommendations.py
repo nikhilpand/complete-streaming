@@ -144,10 +144,24 @@ EVENT_MAP = {
 }
 
 
-@router.post("/events")
-@router.post("/recommendations/events")
+@router.post(
+    "/recommendations/events",
+    summary="Ingest user playback telemetry event into taste engine (canonical)",
+    tags=["recommendations"],
+)
+@router.post(
+    "/events",
+    summary="Compatibility alias for /recommendations/events",
+    deprecated=True,
+    include_in_schema=False,
+    tags=["recommendations"],
+)
 def post_event(e: EventIn):
-    """Log user playback telemetry and update taste profile in real-time."""
+    """Log user playback telemetry and update taste profile in real-time.
+    
+    Canonical write endpoint: POST /api/v1/recommendations/events
+    Note: POST /api/v1/events is maintained as a backward-compatible alias.
+    """
     eng = get_taste_engine()
     sid = clean_track_id(e.track_id)
     evt_type = EVENT_MAP.get(e.type, EventType.PLAY_STARTED)

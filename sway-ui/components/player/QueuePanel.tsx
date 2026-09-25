@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ListMusic, Music2, Sparkles, Plus } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
 import { Artwork } from '@/components/artwork/Artwork';
-import { artUrl, artistNames, formatMs, cn } from '@/lib/utils';
+import { artistNames, formatMs, cn } from '@/lib/utils';
 import { getNextQueue, queueTrackToSong } from '@/lib/api/queue';
 import type { QueueTrack } from '@/lib/api/types';
 

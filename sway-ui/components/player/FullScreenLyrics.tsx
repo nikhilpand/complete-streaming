@@ -20,6 +20,7 @@ import { LyricsSettingsPopover } from './LyricsSettingsPopover';
 import { DesktopLyricsProgressBar } from './lyrics/DesktopLyricsProgressBar';
 import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
 import { usePlaybackTelemetry, type RecommendationTrack } from '@/hooks/usePlaybackTelemetry';
+import { Artwork } from '@/components/artwork/Artwork';
 import { artistNames } from '@/lib/utils';
 import type { LyricsTimingProvenance, LyricsSyncType } from '@/lib/lyrics-engine/types';
 
@@ -814,13 +815,12 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="album-art shrink-0 overflow-hidden relative group"
         >
-          {coverUrl && coverUrl.trim() ? (
-            <img src={coverUrl} alt={currentTrack.title} className="w-full h-full object-cover select-none" draggable={false} />
-          ) : (
-            <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
-              <Music2 className="w-12 h-12 text-white/20" />
-            </div>
-          )}
+          <Artwork
+            src={coverUrl}
+            alt={currentTrack.title}
+            size={500}
+            className="w-full h-full object-cover select-none"
+          />
         </motion.div>
 
         {/* Track Title & Artist */}
@@ -1085,13 +1085,12 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
                   Now Playing
                 </span>
                 <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/10 border border-white/15">
-                  {coverUrl && coverUrl.trim() ? (
-                    <img src={coverUrl} alt={currentTrack.title} className="w-10 h-10 rounded-lg object-cover" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
-                      <Music2 className="w-4 h-4 text-white/30" />
-                    </div>
-                  )}
+                  <Artwork
+                    src={coverUrl}
+                    alt={currentTrack.title}
+                    size={40}
+                    className="w-10 h-10 rounded-lg object-cover"
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-white truncate">{currentTrack.title}</p>
                     <p className="text-[11px] text-white/60 truncate">{currentTrack.artist}</p>

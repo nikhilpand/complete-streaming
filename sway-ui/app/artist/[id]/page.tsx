@@ -7,9 +7,10 @@ import { usePlayerStore } from '@/store/playerStore';
 import { SongRow } from '@/components/music/SongRow';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { HorizontalShelf } from '@/components/music/HorizontalShelf';
+import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { artUrl, formatCount } from '@/lib/utils';
+import { formatCount } from '@/lib/utils';
 import type { Artist } from '@/lib/api/types';
 
 export default function ArtistPage({ params }: { params: Promise<{ id: string }> }) {
@@ -39,8 +40,13 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
     <div>
       {/* Hero */}
       <div className="relative h-72 md:h-80 bg-[--surface-elevated] overflow-hidden">
-        {artist?.image_url && artUrl(artist.image_url) ? (
-          <img src={artUrl(artist.image_url)} alt={artist.name} className="w-full h-full object-cover object-top opacity-50" />
+        {artist?.image_url ? (
+          <Artwork
+            src={artist.image_url}
+            alt={artist.name}
+            size={1200}
+            className="w-full h-full object-cover object-top opacity-50"
+          />
         ) : null}
         <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 30%, var(--surface))' }} />
         <div className="absolute bottom-0 left-0 right-0 px-6 pb-6">

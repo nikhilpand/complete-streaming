@@ -8,7 +8,7 @@ import { HorizontalShelf } from '@/components/music/HorizontalShelf';
 import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { artUrl, artistNames } from '@/lib/utils';
+import { artistNames } from '@/lib/utils';
 import type { Song } from '@/lib/api/types';
 
 export default function HomePage() {

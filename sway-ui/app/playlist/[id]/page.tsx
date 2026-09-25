@@ -8,7 +8,7 @@ import { SongRow } from '@/components/music/SongRow';
 import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { artUrl, formatCount } from '@/lib/utils';
+import { formatCount } from '@/lib/utils';
 import type { Playlist } from '@/lib/api/types';
 
 export default function PlaylistPage({ params }: { params: Promise<{ id: string }> }) {
