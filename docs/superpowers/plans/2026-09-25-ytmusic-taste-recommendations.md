@@ -131,18 +131,18 @@ sway-ui/
 - Test: `sway_taste_engine/tests/test_config.py`, `sway_taste_engine/tests/test_event_models.py`
 
 **Tasks:**
-- [ ] **Task 0.1: Write tests for configurable weights and multi-horizon models**
+- [x] **Task 0.1: Write tests for configurable weights and multi-horizon models**
   - Verify `RecommendationWeights` defaults match calibrated prior values (`like: 2.5`, `save: 2.75`, `completed: 1.0`, `replay: 1.1`, `play_30s: 0.3`, `play_10s: 0.15`, `skip_10_30s: -0.6`, `skip_lt_10s: -1.4`, `dislike: -3.5`, `not_interested: -5.0`).
   - Verify `QueueWeights` defaults match continuity requirements (`mood_continuity: 0.30`, `energy_smoothness: 0.25`, `artist_affinity: 0.20`, `transition_graph: 0.15`, `novelty: 0.10`).
   - Verify `Track` initializes with optional `FeatureValue` derived attributes, allowing `None` values and recording feature source and confidence.
   - Verify `UserEvent` validates 3-tier identity (`account_id`, `anonymous_id`, `session_id`) and milestone event types.
-- [ ] **Task 0.2: Run tests to confirm red state**
+- [x] **Task 0.2: Run tests to confirm red state**
   `pytest sway_taste_engine/tests/test_config.py sway_taste_engine/tests/test_event_models.py`
-- [ ] **Task 0.3: Implement `config.py` and update `models.py`**
+- [x] **Task 0.3: Implement `config.py` and update `models.py`**
   - Implement Pydantic `BaseModel` settings in `config.py`.
   - Update `models.py` with `FeatureValue`, structured `ArtistRole`, `EventType`, `UserEvent`, and multi-horizon `UserTasteProfile`.
-- [ ] **Task 0.4: Re-run tests to confirm green state**
-- [ ] **Task 0.5: Commit**
+- [x] **Task 0.4: Re-run tests to confirm green state**
+- [x] **Task 0.5: Commit**
   `git commit -m "feat(taste): freeze contracts for multi-horizon profile, configurable weights, and feature provenance"`
 
 ---
@@ -159,19 +159,19 @@ sway-ui/
 - Test: `sway_taste_engine/tests/test_sqlite_storage.py`
 
 **Tasks:**
-- [ ] **Task 1.1: Write tests for SQLiteTasteStore operations**
+- [x] **Task 1.1: Write tests for SQLiteTasteStore operations**
   - Test profile save and retrieval across distinct store instances.
   - Test event logging, deduplication by `event_id`, and horizon queries (`get_recent_events(user_id, days=30)`).
   - Test similarity edge upsert and top-K nearest neighbor lookup ($O(1)$ query by `from_track_id`).
   - Test transition recording ($A \rightarrow B$ completion and skip counters) and transition score query.
   - Test thread concurrency and WAL mode configuration.
-- [ ] **Task 1.2: Run tests to confirm red state**
+- [x] **Task 1.2: Run tests to confirm red state**
   `pytest sway_taste_engine/tests/test_sqlite_storage.py`
-- [ ] **Task 1.3: Implement `TasteStore` interface and `SQLiteTasteStore`**
+- [x] **Task 1.3: Implement `TasteStore` interface and `SQLiteTasteStore`**
   - Schema tables: `taste_profiles`, `event_telemetry`, `tracks`, `similarity_edges` (`(from_track_id, to_track_id, score, source, updated_at)`), `track_transitions` (`(from_track_id, to_track_id, count_completed, count_skipped)`).
   - Connection context manager with `PRAGMA journal_mode=WAL;` and row factory.
-- [ ] **Task 1.4: Re-run tests to confirm green state**
-- [ ] **Task 1.5: Commit**
+- [x] **Task 1.4: Re-run tests to confirm green state**
+- [x] **Task 1.5: Commit**
   `git commit -m "feat(storage): implement SQLiteTasteStore with WAL mode and similarity edge indexing"`
 
 ---
@@ -192,16 +192,16 @@ sway-ui/
 - Test: `sway_taste_engine/tests/test_normalizer.py`, `sway_taste_engine/tests/test_profile_decay.py`
 
 **Tasks:**
-- [ ] **Task 2.1: Write tests for event normalization and multi-horizon decay**
+- [x] **Task 2.1: Write tests for event normalization and multi-horizon decay**
   - Test normalization: assigns calibrated weights based on completion ratio and milestones (e.g., skip <10s = -1.4, completed = +1.0, like = +2.5).
   - Test decay: verifies an event 14 days ago decays by $75\%$ in `recent_30d` but only by $15\%$ in `long_term`.
   - Test negative memory: verifies `dislike` immediately prunes artist affinity and records track in `explicit_negative_tracks`.
   - Test session mood: verifies consecutive listens in a session dynamically update `session_state.active_moods`.
-- [ ] **Task 2.2: Run tests to confirm red state**
+- [x] **Task 2.2: Run tests to confirm red state**
   `pytest sway_taste_engine/tests/test_normalizer.py sway_taste_engine/tests/test_profile_decay.py`
-- [ ] **Task 2.3: Implement `normalizer.py` and update `profile.py`**
-- [ ] **Task 2.4: Re-run tests to confirm green state**
-- [ ] **Task 2.5: Commit**
+- [x] **Task 2.3: Implement `normalizer.py` and update `profile.py`**
+- [x] **Task 2.4: Re-run tests to confirm green state**
+- [x] **Task 2.5: Commit**
   `git commit -m "feat(profile): implement telemetry normalizer and multi-horizon profile decay"`
 
 ---
@@ -220,16 +220,16 @@ sway-ui/
 - Test: `sway_taste_engine/tests/test_metadata_extractor.py`
 
 **Tasks:**
-- [ ] **Task 3.1: Write tests for metadata extraction and feature provenance**
+- [x] **Task 3.1: Write tests for metadata extraction and feature provenance**
   - Test parsing multi-artist roles (e.g., "Pritam" identified as composer, "Atif Aslam" as primary singer).
   - Test release year extraction from `year` or `release_date`.
   - Test null-safety: verify unmeasured energy/bpm returns `FeatureValue(value=None, source="unmeasured", confidence=0.0)`.
   - Test that popular genre/mood heuristics provide explicit provenance tag `source="title_tag_heuristic"` with confidence <= 0.6.
-- [ ] **Task 3.2: Run tests to confirm red state**
+- [x] **Task 3.2: Run tests to confirm red state**
   `pytest sway_taste_engine/tests/test_metadata_extractor.py`
-- [ ] **Task 3.3: Implement `metadata.py` and update `recommendations.py`**
-- [ ] **Task 3.4: Re-run tests to confirm green state**
-- [ ] **Task 3.5: Commit**
+- [x] **Task 3.3: Implement `metadata.py` and update `recommendations.py`**
+- [x] **Task 3.4: Re-run tests to confirm green state**
+- [x] **Task 3.5: Commit**
   `git commit -m "feat(metadata): add dynamic metadata extractor with feature provenance and zero synthetic defaults"`
 
 ---
@@ -254,15 +254,15 @@ sway-ui/
 - Test: `music/tests/integration/test_candidate_builder.py`
 
 **Tasks:**
-- [ ] **Task 4.1: Write integration tests for candidate generation and budgeting**
+- [x] **Task 4.1: Write integration tests for candidate generation and budgeting**
   - Test that candidate builder with seed "Tu Chahiye" (Atif Aslam) produces >= 150 candidates.
   - Verify candidates contain songs by the same artist, similar artists (e.g. Arijit Singh, Mohit Chauhan), composer soundtrack songs (Pritam), and discovery tracks.
   - Verify generator budgets are respected and duplicates are deduplicated.
-- [ ] **Task 4.2: Run tests to confirm red state**
+- [x] **Task 4.2: Run tests to confirm red state**
   `pytest music/tests/integration/test_candidate_builder.py`
-- [ ] **Task 4.3: Implement `CandidateBuilder` in `music/app/services/candidate_builder.py`**
-- [ ] **Task 4.4: Re-run tests to confirm green state**
-- [ ] **Task 4.5: Commit**
+- [x] **Task 4.3: Implement `CandidateBuilder` in `music/app/services/candidate_builder.py`**
+- [x] **Task 4.4: Re-run tests to confirm green state**
+- [x] **Task 4.5: Commit**
   `git commit -m "feat(retrieval): implement 300+ candidate multi-generator builder with strict budgeting"`
 
 ---
@@ -282,16 +282,16 @@ sway-ui/
 - Test: `sway_taste_engine/tests/test_similarity.py`
 
 **Tasks:**
-- [ ] **Task 5.1: Write tests for similarity engine and indexed edge retrieval**
+- [x] **Task 5.1: Write tests for similarity engine and indexed edge retrieval**
   - Verify similarity scoring between tracks sharing artist/composer/era (e.g. Atif Aslam 2015 romantic vs 2016 romantic ballad scores > 0.75).
   - Verify dissimilarity between acoustic ballads and club/electronic tracks.
   - Verify precomputed similarity edges are written to SQLite and retrieved in $O(1)$ by `SimilarTrackRetriever`.
   - Verify `SimilarArtistRetriever` returns related artists from persistent edges.
-- [ ] **Task 5.2: Run tests to confirm red state**
+- [x] **Task 5.2: Run tests to confirm red state**
   `pytest sway_taste_engine/tests/test_similarity.py`
-- [ ] **Task 5.3: Implement `similarity.py` and update `retrieval.py`**
-- [ ] **Task 5.4: Re-run tests to confirm green state**
-- [ ] **Task 5.5: Commit**
+- [x] **Task 5.3: Implement `similarity.py` and update `retrieval.py`**
+- [x] **Task 5.4: Re-run tests to confirm green state**
+- [x] **Task 5.5: Commit**
   `git commit -m "feat(similarity): implement precomputed similarity graph with O(1) edge retrieval"`
 
 ---
@@ -311,15 +311,15 @@ sway-ui/
 - Test: `sway_taste_engine/tests/test_ranking_explanations.py`, `sway_taste_engine/tests/test_diversity.py`
 
 **Tasks:**
-- [ ] **Task 6.1: Write tests for ranking explanations and diversity constraints**
+- [x] **Task 6.1: Write tests for ranking explanations and diversity constraints**
   - Verify every ranked candidate contains an explainable component dictionary.
   - Verify explicit negative tracks/artists have score = 0 or are filtered out.
   - Verify diversity re-ranker breaks up artist clumps without sacrificing overall quality.
-- [ ] **Task 6.2: Run tests to confirm red state**
+- [x] **Task 6.2: Run tests to confirm red state**
   `pytest sway_taste_engine/tests/test_ranking_explanations.py sway_taste_engine/tests/test_diversity.py`
-- [ ] **Task 6.3: Implement ranking and diversity enhancements**
-- [ ] **Task 6.4: Re-run tests to confirm green state**
-- [ ] **Task 6.5: Commit**
+- [x] **Task 6.3: Implement ranking and diversity enhancements**
+- [x] **Task 6.4: Re-run tests to confirm green state**
+- [x] **Task 6.5: Commit**
   `git commit -m "feat(ranking): implement explainable multi-feature ranker and sliding-window diversity re-ranker"`
 
 ---
@@ -350,16 +350,16 @@ sway-ui/
 - Test: `music/tests/integration/test_home_api.py`, `music/tests/integration/test_queue_api.py`, `sway_taste_engine/tests/test_queue_planner.py`
 
 **Tasks:**
-- [ ] **Task 7.1: Write tests for Home shelves and Next Queue transition planning**
+- [x] **Task 7.1: Write tests for Home shelves and Next Queue transition planning**
   - Verify `/api/v1/home` returns 5 distinct shelves with non-empty tracks, badges, and artwork.
   - Verify `/api/v1/queue/next` from a slow romantic ballad selects compatible ballads, avoiding abrupt tempo/genre cliffs.
   - Verify historical transitions ($A \rightarrow B$) boost continuation scores.
-- [ ] **Task 7.2: Run tests to confirm red state**
+- [x] **Task 7.2: Run tests to confirm red state**
   `pytest music/tests/integration/test_home_api.py music/tests/integration/test_queue_api.py sway_taste_engine/tests/test_queue_planner.py`
-- [ ] **Task 7.3: Implement `mix_planner.py`, `queue_planner.py`, `home.py`, and `queue.py`**
+- [x] **Task 7.3: Implement `mix_planner.py`, `queue_planner.py`, `home.py`, and `queue.py`**
   - Register `home.router` and `queue.router` in `music/app/main.py`.
-- [ ] **Task 7.4: Re-run tests to confirm green state**
-- [ ] **Task 7.5: Commit**
+- [x] **Task 7.4: Re-run tests to confirm green state**
+- [x] **Task 7.5: Commit**
   `git commit -m "feat(surfaces): implement multi-shelf home feed and sequence-optimized next queue"`
 
 ---
@@ -384,16 +384,16 @@ sway-ui/
 - Test: Next.js build verification (`npm run build` in `sway-ui`)
 
 **Tasks:**
-- [ ] **Task 8.1: Implement `telemetry.ts` and `home.ts` API clients**
+- [x] **Task 8.1: Implement `telemetry.ts` and `home.ts` API clients**
   - Include 3-tier identity headers on every request (`x-sway-user-id`, `x-sway-anon-id`, `x-sway-session-id`).
-- [ ] **Task 8.2: Wire milestone tracking in `usePlayback.ts`**
+- [x] **Task 8.2: Wire milestone tracking in `usePlayback.ts`**
   - Track playback duration and completion percentage via ref ticks.
   - Fire milestone telemetry only once per track play.
-- [ ] **Task 8.3: Update `sway-ui/app/page.tsx` for dynamic multi-shelf rendering**
+- [x] **Task 8.3: Update `sway-ui/app/page.tsx` for dynamic multi-shelf rendering**
   - Render Quick Mix hero, Because You Listened shelf, Artist Radar, and Rediscover shelves.
-- [ ] **Task 8.4: Verify frontend build**
+- [x] **Task 8.4: Verify frontend build**
   `cd sway-ui && npm run build`
-- [ ] **Task 8.5: Commit**
+- [x] **Task 8.5: Commit**
   `git commit -m "feat(ui): implement client telemetry milestones, session identity, and dynamic home shelves"`
 
 ---
@@ -417,16 +417,16 @@ sway-ui/
 - Create: `music/tests/integration/test_taste_regression_anchors.py`
 
 **Tasks:**
-- [ ] **Task 9.1: Write tests for debug attribution and regression anchors**
+- [x] **Task 9.1: Write tests for debug attribution and regression anchors**
   - Verify `/api/v1/recommendations/debug` returns full component breakdown.
   - Verify "Tu Chahiye" test asserts >= 150 candidates and proper contemporary artists.
   - Verify queue transition test asserts smooth energy/tempo slope.
-- [ ] **Task 9.2: Run tests to confirm red state**
+- [x] **Task 9.2: Run tests to confirm red state**
   `pytest music/tests/integration/test_recommendations_debug.py music/tests/integration/test_taste_regression_anchors.py`
-- [ ] **Task 9.3: Implement `/debug` endpoint and shadow mode comparator**
-- [ ] **Task 9.4: Re-run all tests across backend and taste engine**
+- [x] **Task 9.3: Implement `/debug` endpoint and shadow mode comparator**
+- [x] **Task 9.4: Re-run all tests across backend and taste engine**
   `pytest music/` and `pytest sway_taste_engine/`
-- [ ] **Task 9.5: Commit**
+- [x] **Task 9.5: Commit**
   `git commit -m "feat(observability): add recommendation debug endpoint, shadow mode, and regression anchors"`
 
 ---
