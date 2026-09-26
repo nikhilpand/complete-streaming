@@ -13,7 +13,7 @@ export type AudioEvent =
   | { type: 'error'; message: string }
   | { type: 'volumechange'; volume: number; muted: boolean };
 
-class AudioManager {
+export class AudioManager {
   private audio: HTMLAudioElement | null = null;
   private listeners = new Set<Listener>();
   private rafId: number | null = null;

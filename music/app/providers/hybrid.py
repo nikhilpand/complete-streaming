@@ -185,7 +185,7 @@ def _extract_item_metadata(item: SearchItem) -> tuple[str, str, str]:
 
 
 DERIVATIVE_KEYWORDS = (
-    "slowed", "reverb", "sped", "speed", "speed up", "sped up",
+    "slowed", "reverb", "speed up", "sped up",
     "workout", "karaoke", "instrumental", "tribute", "8d", "16d",
     "bass boosted", "nightcore", "ringtone",
 )
@@ -270,13 +270,21 @@ def _score_relevance(query: str, item: SearchItem, source_rank: int) -> float:
         score += 20.0
 
     # 5. Demote derivative junk (slowed, sped up, workout, karaoke, etc.) unless query requested it
-    query_has_deriv = any(kw in q_lower for kw in DERIVATIVE_KEYWORDS)
+    query_has_deriv = (
+        any(re.search(r'(?:\b|_)' + re.escape(kw) + r'(?:\b|_)', q_lower) for kw in DERIVATIVE_KEYWORDS)
+        or "cover" in q_lower
+        or "remix" in q_lower
+    )
     if not query_has_deriv:
-        if any(kw in t_lower for kw in DERIVATIVE_KEYWORDS):
+        if any(re.search(r'(?:\b|_)' + re.escape(kw) + r'(?:\b|_)', t_lower) for kw in DERIVATIVE_KEYWORDS):
             score -= 250.0
-        elif "cover" in t_lower and "cover" not in q_lower:
+        elif (
+            re.search(r'[\(\[\{\-]\s*(?:acoustic\s+|piano\s+|guitar\s+|live\s+)?covers?\b', t_lower)
+            or re.search(r'\bcovers?\s*(?:version|\s+by\s+|[\)\]\}])', t_lower)
+            or re.search(r'\b(?:acoustic|instrumental|piano|guitar|rock|jazz|live)\s+covers?\b', t_lower)
+        ) and "cover" not in q_lower:
             score -= 200.0
-        elif "remix" in t_lower and "remix" not in q_lower:
+        elif re.search(r'\bremix(?:es)?\b', t_lower) and "remix" not in q_lower:
             score -= 200.0
         elif ("lirik" in t_lower or "lyrics video" in t_lower) and "lyric" not in q_lower:
             score -= 100.0

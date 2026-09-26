@@ -123,9 +123,9 @@ class EventIn(BaseModel):
     album: Optional[str] = None
     genre: Optional[str] = None
     mood: Optional[str] = None
-    position_ms: Optional[int] = 0
-    duration_ms: Optional[int] = None
-    completion_ratio: Optional[float] = None
+    position_ms: Optional[int] = Field(default=0, ge=0)
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+    completion_ratio: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     thumbnail: Optional[str] = None
     source: Optional[str] = None
     query: Optional[str] = None
