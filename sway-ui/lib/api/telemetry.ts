@@ -69,6 +69,10 @@ export interface TelemetryEvent {
     | 'replay'
     | 'search';
   track_id?: string;
+  title?: string;
+  artist?: string;
+  artist_id?: string;
+  artwork_url?: string;
   source?: string;
   query?: string;
   position_ms?: number;
@@ -92,12 +96,20 @@ export function sendTelemetry(event: TelemetryEvent): void {
     account_id: accountId,
     event_type: event.event_type,
     track_id: event.track_id || '',
+    title: event.title,
+    artist: event.artist,
+    artist_id: event.artist_id,
     source: event.source,
     query: event.query,
     position_ms: event.position_ms,
     duration_ms: event.duration_ms,
     completion_ratio: event.completion_ratio,
-    metadata: event.metadata || {},
+    metadata: {
+      ...(event.metadata || {}),
+      ...(event.title ? { title: event.title } : {}),
+      ...(event.artist ? { artist: event.artist } : {}),
+      ...(event.artwork_url ? { artwork_url: event.artwork_url } : {}),
+    },
   };
 
   const url = '/api/proxy/recommendations/events';

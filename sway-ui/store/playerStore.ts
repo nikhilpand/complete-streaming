@@ -15,6 +15,7 @@ interface PlayerStore {
   playbackContext: PlaybackContext | null;
   queue: Song[];
   queueIndex: number;
+  queueGeneration: number;
   status: PlayerStatus;
   currentTime: number;
   duration: number;
@@ -56,6 +57,7 @@ export const usePlayerStore = create<PlayerStore>()(
     playbackContext: null,
     queue: [],
     queueIndex: 0,
+    queueGeneration: 0,
     status: 'idle',
     currentTime: 0,
     duration: 0,
@@ -68,15 +70,20 @@ export const usePlayerStore = create<PlayerStore>()(
     isQueueOpen: false,
     isLyricsOpen: false,
 
-    setCurrentTrack: (track, context = null) => set({
+    setCurrentTrack: (track, context = null) => set((s) => ({
       currentTrack: track,
       playbackContext: context,
       error: null,
       status: 'loading',
       bufferedTime: 0,
-    }),
+      queueGeneration: s.queueGeneration + 1,
+    })),
     setPlaybackContext: (ctx) => set({ playbackContext: ctx }),
-    setQueue: (songs, startIndex = 0) => set({ queue: songs, queueIndex: startIndex }),
+    setQueue: (songs, startIndex = 0) => set((s) => ({
+      queue: songs,
+      queueIndex: startIndex,
+      queueGeneration: s.queueGeneration + 1,
+    })),
     addToQueue: (song) => set((s) => ({ queue: [...s.queue, song] })),
     playNext: () => {
       const { queue, queueIndex, repeatMode, isShuffled } = get();
@@ -100,32 +107,44 @@ export const usePlayerStore = create<PlayerStore>()(
           } else {
             const lastTrack = get().currentTrack;
             if (lastTrack?.id) {
-              set({ status: 'loading' });
+              const reqGen = get().queueGeneration + 1;
+              set({ status: 'loading', queueGeneration: reqGen });
               import('@/lib/api/queue')
                 .then(async ({ getNextQueue, queueTrackToSong }) => {
                   try {
                     const tracks = await getNextQueue(lastTrack.id, 5);
                     if (tracks && tracks.length > 0) {
+                      if (get().queueGeneration !== reqGen || get().currentTrack?.id !== lastTrack.id) {
+                        return;
+                      }
                       const newSongs = tracks.map(queueTrackToSong);
                       const currentQ = get().queue;
                       const updatedQueue = [...currentQ, ...newSongs];
                       const nextIndex = currentQ.length;
-                      set({
-                        queue: updatedQueue,
-                        queueIndex: nextIndex,
-                        currentTrack: updatedQueue[nextIndex],
-                        status: 'loading',
-                        error: null,
+                      set((s) => {
+                        if (s.queueGeneration !== reqGen || s.currentTrack?.id !== lastTrack.id) return {};
+                        return {
+                          queue: updatedQueue,
+                          queueIndex: nextIndex,
+                          currentTrack: updatedQueue[nextIndex],
+                          status: 'loading',
+                          error: null,
+                          queueGeneration: s.queueGeneration + 1,
+                        };
                       });
                       return;
                     }
                   } catch {
                     // Fall through to idle
                   }
-                  set({ status: 'idle' });
+                  if (get().queueGeneration === reqGen && get().currentTrack?.id === lastTrack.id) {
+                    set({ status: 'idle' });
+                  }
                 })
                 .catch(() => {
-                  set({ status: 'idle' });
+                  if (get().queueGeneration === reqGen && get().currentTrack?.id === lastTrack.id) {
+                    set({ status: 'idle' });
+                  }
                 });
               return;
             }
@@ -134,7 +153,13 @@ export const usePlayerStore = create<PlayerStore>()(
           }
         }
       }
-      set({ queueIndex: next, currentTrack: queue[next], error: null, status: 'loading' });
+      set((s) => ({
+        queueIndex: next,
+        currentTrack: queue[next],
+        error: null,
+        status: 'loading',
+        queueGeneration: s.queueGeneration + 1,
+      }));
     },
     playPrev: () => {
       const { queue, queueIndex, currentTime } = get();
@@ -149,7 +174,13 @@ export const usePlayerStore = create<PlayerStore>()(
         return;
       }
       const prev = Math.max(0, queueIndex - 1);
-      set({ queueIndex: prev, currentTrack: queue[prev], error: null, status: 'loading' });
+      set((s) => ({
+        queueIndex: prev,
+        currentTrack: queue[prev],
+        error: null,
+        status: 'loading',
+        queueGeneration: s.queueGeneration + 1,
+      }));
     },
     play: () => {
       if (typeof window !== 'undefined') {

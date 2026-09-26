@@ -33,6 +33,12 @@ EVENT_NEGATIVE = {
     EventType.UNSAVE: 1.2,
 }
 
+def _is_valid_artist(artist_id: Optional[str]) -> bool:
+    if not artist_id:
+        return False
+    clean = artist_id.strip().lower()
+    return clean not in ("artist_unknown", "unknown", "none", "null", "") and not clean.startswith("unknown")
+
 
 class TasteProfileBuilder:
     """Builds multi-horizon user taste profiles with calibrated time decay and negative memory isolation."""
@@ -182,7 +188,7 @@ class TasteProfileBuilder:
                 tb_l.count += 1
                 tb_l.last_seen = event_ts.timestamp()
 
-                if artist_id:
+                if _is_valid_artist(artist_id):
                     ab_l = self._bucket(p.long_term.artist, artist_id)
                     ab_l.positive += pos_long
                     ab_l.negative += neg_long
@@ -218,7 +224,7 @@ class TasteProfileBuilder:
                     tb_r.count += 1
                     tb_r.last_seen = event_ts.timestamp()
 
-                    if artist_id:
+                    if _is_valid_artist(artist_id):
                         ab_r = self._bucket(p.recent_30d.artist, artist_id)
                         ab_r.positive += pos_recent
                         ab_r.negative += neg_recent
@@ -252,7 +258,7 @@ class TasteProfileBuilder:
                     long_energy.append((track.energy, max(0.1, pos_long)))
 
                 recent_ids.append((event_ts, track.id, artist_id or "", track.album_id))
-            elif artist_id:
+            elif _is_valid_artist(artist_id):
                 # Update artist affinity even if full track is not yet in catalog
                 ab_l = self._bucket(p.long_term.artist, artist_id)
                 ab_l.positive += pos_long
@@ -271,11 +277,12 @@ class TasteProfileBuilder:
                 for c_t in catalog.values():
                     if c_t.artist_name and q_clean in c_t.artist_name.lower():
                         matched_artist = c_t.artist_id
-                        ab_l = self._bucket(p.long_term.artist, matched_artist)
-                        ab_l.positive += pos_long
-                        if is_in_rolling:
-                            ab_r = self._bucket(p.recent_30d.artist, matched_artist)
-                            ab_r.positive += pos_recent
+                        if _is_valid_artist(matched_artist):
+                            ab_l = self._bucket(p.long_term.artist, matched_artist)
+                            ab_l.positive += pos_long
+                            if is_in_rolling:
+                                ab_r = self._bucket(p.recent_30d.artist, matched_artist)
+                                ab_r.positive += pos_recent
                         break
 
             # 3. Update negative memory

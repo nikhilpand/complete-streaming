@@ -152,3 +152,139 @@ async def test_candidate_builder_budgets_and_pool_size(seed_song, user_profile):
         stored = store.get_track(c.id)
         assert stored is not None
         assert stored.id == c.id
+
+
+class MockYTMProvider(MockProvider):
+    async def get_radio_candidates(self, video_id: str, limit: int = 30) -> list[Song]:
+        return [
+            Song(
+                id=f"youtube:yt_radio_{i}",
+                provider="youtube",
+                provider_id=f"yt_radio_{i}",
+                title=f"YTM Radio Track {i}",
+                artists=[ArtistRef(id="a_yt_radio", provider="youtube", provider_id="a_yt_radio", name="YTM Radio Artist", role="singer")],
+                language="hindi",
+                duration_ms=220000,
+            )
+            for i in range(limit + 5)
+        ]
+
+    async def get_related_candidates(self, video_id: str, limit: int = 30) -> list[Song]:
+        return [
+            Song(
+                id=f"youtube:yt_related_{i}",
+                provider="youtube",
+                provider_id=f"yt_related_{i}",
+                title=f"YTM Related Track {i}",
+                artists=[ArtistRef(id="a_yt_related", provider="youtube", provider_id="a_yt_related", name="YTM Related Artist", role="singer")],
+                language="hindi",
+                duration_ms=230000,
+            )
+            for i in range(limit + 5)
+        ]
+
+    async def get_artist_candidates(self, artist_name_or_channel_id: str, limit: int = 30) -> list[Song]:
+        return [
+            Song(
+                id=f"youtube:yt_artist_{i}",
+                provider="youtube",
+                provider_id=f"yt_artist_{i}",
+                title=f"YTM Artist Track {i}",
+                artists=[ArtistRef(id="a_yt_art", provider="youtube", provider_id="a_yt_art", name="YTM Channel Artist", role="singer")],
+                language="hindi",
+                duration_ms=240000,
+            )
+            for i in range(limit + 5)
+        ]
+
+
+@pytest.mark.asyncio
+async def test_candidate_builder_ytm_generators_and_deduplication(seed_song, user_profile):
+    provider = MockYTMProvider()
+    store = InMemoryStore()
+    builder = CandidateBuilder(provider=provider, taste_store=store)
+
+    # Seed song with youtube video id
+    yt_seed = Song(
+        id="youtube:dQw4w9WgXcQ",
+        provider="youtube",
+        provider_id="dQw4w9WgXcQ",
+        title="Seed YTM Song",
+        artists=[ArtistRef(id="a_atif", provider="youtube", provider_id="a_atif", name="Atif Aslam", role="singer")],
+        duration_ms=210000,
+    )
+
+    candidates, attribution = await builder.build_candidates(
+        seed_song=yt_seed,
+        profile=user_profile,
+    )
+
+    # Check that YTM generator quotas were respected
+    assert "ytm_radio" in attribution
+    assert "ytm_related" in attribution
+    assert "ytm_artist" in attribution
+    assert attribution["ytm_radio"] <= 30
+    assert attribution["ytm_related"] <= 30
+    assert attribution["ytm_artist"] <= 30
+
+    # Ensure YTM candidates are present in the deduplicated pool
+    yt_ids = [c.id for c in candidates if c.id.startswith("youtube:")]
+    assert len(yt_ids) > 0
+    # No duplicate ids across combined pools
+    assert len(candidates) == len(set(c.id for c in candidates))
+
+
+class FaultyYTMProvider(MockProvider):
+    async def get_radio_candidates(self, video_id: str, limit: int = 30) -> list[Song]:
+        raise RuntimeError("Upstream YouTube Music watch playlist 503 Service Unavailable")
+
+    async def get_related_candidates(self, video_id: str, limit: int = 30) -> list[Song]:
+        raise ConnectionResetError("Connection reset by peer")
+
+    async def get_artist_candidates(self, artist_name_or_channel_id: str, limit: int = 30) -> list[Song]:
+        raise TimeoutError("YouTube Music API request timed out")
+
+
+@pytest.mark.asyncio
+async def test_candidate_builder_ytm_failure_is_non_fatal(seed_song, user_profile):
+    """When YouTube Music upstream fails or throws errors, CandidateBuilder must not fail."""
+    provider = FaultyYTMProvider()
+    store = InMemoryStore()
+    builder = CandidateBuilder(provider=provider, taste_store=store)
+
+    candidates, attribution = await builder.build_candidates(
+        seed_song=seed_song,
+        profile=user_profile,
+    )
+
+    # Graceful fallback: candidates from other generators are preserved
+    assert len(candidates) >= 100
+    assert attribution.get("ytm_radio", 0) == 0
+    assert attribution.get("ytm_related", 0) == 0
+    assert attribution.get("ytm_artist", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_candidate_builder_filters_negative_memory_and_dislikes(seed_song, user_profile):
+    """CandidateBuilder strictly prunes tracks in negative memory, explicit dislikes, and unplayable items."""
+    provider = MockProvider()
+    store = InMemoryStore()
+    builder = CandidateBuilder(provider=provider, taste_store=store)
+
+    # Add disliked track and negative artist to profile
+    user_profile.explicit_negative_tracks.add("atif_song_0")
+    user_profile.negative_memory.high_confidence_skips.add("atif_song_1")
+    user_profile.explicit_negative_artists.add("a_pritam")
+
+    candidates, _ = await builder.build_candidates(
+        seed_song=seed_song,
+        profile=user_profile,
+    )
+
+    candidate_ids = {c.id for c in candidates}
+    # Disliked and skipped tracks must NOT be present
+    assert "atif_song_0" not in candidate_ids
+    assert "atif_song_1" not in candidate_ids
+    for c in candidates:
+        assert c.artist_id != "a_pritam"
+

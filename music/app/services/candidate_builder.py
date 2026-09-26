@@ -17,6 +17,7 @@ from app.models import Song
 from app.providers.base import MusicProvider
 from sway_taste_engine.metadata import clean_track_id, extract_track_features
 from sway_taste_engine.models import Track, UserTasteProfile
+from sway_taste_engine.normalizer import canonical_song_key, is_derivative_track
 from sway_taste_engine.storage import TasteStore
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,9 @@ class GeneratorBudget:
     collaborative: int = 50
     discovery: int = 50
     exploration: int = 30
+    ytm_radio: int = 30
+    ytm_related: int = 30
+    ytm_artist: int = 30
 
 
 # Pre-mapped contemporary artist clusters for high-affinity Indian music genres
@@ -47,7 +51,7 @@ CONTEMPORARY_ARTISTS: dict[str, list[str]] = {
 class CandidateBuilder:
     """Multi-generator candidate retrieval pipeline with strict generator budgeting.
 
-    Aggregates candidates across 7 distinct generators:
+    Aggregates candidates across distinct generators:
     1. same_artist (budget 40)
     2. similar_artists (budget 50)
     3. album_soundtrack (budget 30)
@@ -55,8 +59,11 @@ class CandidateBuilder:
     5. collaborative (budget 50)
     6. discovery (budget 50)
     7. exploration (budget 30)
+    8. ytm_radio (budget 30)
+    9. ytm_related (budget 30)
+    10. ytm_artist (budget 30)
 
-    Guarantees a diversified candidate pool of 150–350 deduplicated tracks.
+    Guarantees a diversified candidate pool of 150–400 deduplicated tracks.
     """
 
     def __init__(
@@ -68,13 +75,15 @@ class CandidateBuilder:
         self.provider = provider
         self.taste_store = taste_store
         self.budget = budget or GeneratorBudget()
+        self._seed_video_cache: dict[str, str] = {}
+        self._used_seeds: set[str] = set()
 
     async def build_candidates(
         self,
         seed_song: Optional[Song] = None,
         profile: Optional[UserTasteProfile] = None,
     ) -> Tuple[List[Track], Dict[str, int]]:
-        """Concurrently retrieve candidates across 7 generators with exact quota enforcement."""
+        """Concurrently retrieve candidates across generators with exact quota enforcement."""
         tasks = [
             self._gen_same_artist(seed_song),
             self._gen_similar_artists(seed_song, profile),
@@ -83,6 +92,9 @@ class CandidateBuilder:
             self._gen_collaborative(seed_song),
             self._gen_discovery(seed_song, profile),
             self._gen_exploration(seed_song, profile),
+            self._gen_ytm_radio(seed_song, profile),
+            self._gen_ytm_related(seed_song, profile),
+            self._gen_ytm_artist(seed_song, profile),
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -95,6 +107,9 @@ class CandidateBuilder:
             "collaborative",
             "discovery",
             "exploration",
+            "ytm_radio",
+            "ytm_related",
+            "ytm_artist",
         ]
 
         budgets = [
@@ -105,10 +120,28 @@ class CandidateBuilder:
             self.budget.collaborative,
             self.budget.discovery,
             self.budget.exploration,
+            self.budget.ytm_radio,
+            self.budget.ytm_related,
+            self.budget.ytm_artist,
         ]
 
         dedup_tracks: Dict[str, Track] = {}
+        seen_canonical_keys: Dict[tuple[str, str], str] = {}
         attribution: Dict[str, int] = {name: 0 for name in generator_names}
+
+        seed_c_key = None
+        seed_is_derivative = False
+        if seed_song:
+            seed_artist = getattr(seed_song, "subtitle", "") or (seed_song.artists[0].name if getattr(seed_song, "artists", None) else "")
+            seed_c_key = canonical_song_key(
+                title=getattr(seed_song, "title", ""),
+                artist_name=seed_artist,
+                fallback_id=getattr(seed_song, "id", ""),
+                album=getattr(seed_song, "album", ""),
+            )
+            seed_is_derivative = is_derivative_track(getattr(seed_song, "title", ""), seed_artist)
+            if seed_c_key[0]:
+                seen_canonical_keys[seed_c_key] = getattr(seed_song, "id", "")
 
         for name, budget_limit, res in zip(generator_names, budgets, results):
             if isinstance(res, Exception):
@@ -126,16 +159,56 @@ class CandidateBuilder:
                 if not track.id:
                     continue
 
-                if track.id not in dedup_tracks:
+                # Exclude seed track itself
+                if seed_song and clean_track_id(track.id) == clean_track_id(getattr(seed_song, "id", "")):
+                    continue
+
+                # Exclude derivative uploads (workout, sped up, slowed, karaoke) unless seed song is itself derivative
+                if not seed_is_derivative and is_derivative_track(track.title, track.artist_name):
+                    continue
+
+                # Negative memory filtering
+                if profile and (
+                    track.id in profile.explicit_negative_tracks
+                    or track.artist_id in profile.explicit_negative_artists
+                    or track.id in profile.negative_memory.high_confidence_skips
+                ):
+                    continue
+
+                # Unplayable filtering
+                if not track.playable:
+                    continue
+
+                # Exclude mock / fake fixture tracks
+                if (
+                    (track.title and "sample track" in track.title.lower())
+                    or (track.artist_name and "artist 0" in track.artist_name.lower())
+                    or (track.id and track.id.startswith("track_seed_"))
+                ):
+                    continue
+
+                c_key = canonical_song_key(
+                    title=track.title,
+                    artist_name=track.artist_name,
+                    fallback_id=track.id,
+                    album=track.album,
+                )
+
+                if track.id not in dedup_tracks and (not c_key[0] or c_key not in seen_canonical_keys):
                     dedup_tracks[track.id] = track
+                    if c_key[0]:
+                        seen_canonical_keys[c_key] = track.id
                     count += 1
-                elif track.id in dedup_tracks:
-                    # Merge multi-artist or composer info if missing
-                    existing = dedup_tracks[track.id]
-                    if not existing.composers and track.composers:
-                        existing.composers = track.composers
-                    if not existing.artwork_url and track.artwork_url:
-                        existing.artwork_url = track.artwork_url
+                else:
+                    existing_id = track.id if track.id in dedup_tracks else (seen_canonical_keys.get(c_key) if c_key[0] else None)
+                    if existing_id and existing_id in dedup_tracks:
+                        existing = dedup_tracks[existing_id]
+                        if not existing.composers and track.composers:
+                            existing.composers = track.composers
+                        if not existing.artwork_url and track.artwork_url:
+                            existing.artwork_url = track.artwork_url
+                        if track.provider_available:
+                            existing.provider_available.update(track.provider_available)
 
             attribution[name] = count
 
@@ -148,6 +221,7 @@ class CandidateBuilder:
             logger.warning("Failed to batch upsert candidate tracks to taste store: %s", ex)
 
         return candidate_list, attribution
+
 
     async def _safe_search(self, query: str, n: int) -> List[Any]:
         try:
@@ -363,3 +437,113 @@ class CandidateBuilder:
             if isinstance(r, list):
                 merged.extend(r)
         return merged[: self.budget.exploration]
+
+    async def _resolve_video_id_for_seed(
+        self, seed: Optional[Song], profile: Optional[UserTasteProfile]
+    ) -> Optional[str]:
+        # 1. From seed song
+        if seed:
+            if getattr(seed, "provider", None) == "youtube" and getattr(seed, "provider_id", None):
+                return seed.provider_id
+            sid = getattr(seed, "id", "") or ""
+            if sid.startswith(("youtube:", "yt:")):
+                return clean_track_id(sid)
+            if sid and sid in self._seed_video_cache:
+                return self._seed_video_cache[sid]
+
+            # Try to resolve youtube videoId for non-youtube seed
+            if getattr(seed, "title", None):
+                art = ""
+                if getattr(seed, "artists", None) and seed.artists:
+                    first = seed.artists[0]
+                    art = getattr(first, "name", "") if hasattr(first, "name") else str(first)
+                elif getattr(seed, "subtitle", None):
+                    art = seed.subtitle
+                q = f"{seed.title} {art}".strip()
+                try:
+                    yt_provider = getattr(self.provider, "youtube", None)
+                    if yt_provider and hasattr(yt_provider, "search"):
+                        res = await yt_provider.search(q, n=1)
+                        if res and res.songs:
+                            vid = res.songs[0].provider_id
+                            if vid:
+                                self._seed_video_cache[sid] = vid
+                                return vid
+                except Exception as e:
+                    logger.debug("Failed to resolve seed video ID from query %r: %s", q, e)
+
+        # 2. From recent successful tracks in profile (avoiding recently used seeds)
+        if profile:
+            for tid in profile.recent_tracks:
+                if tid not in self._used_seeds and tid.startswith(("youtube:", "yt:")):
+                    self._used_seeds.add(tid)
+                    return clean_track_id(tid)
+            for tid, b in sorted(profile.recent_30d.track.items(), key=lambda x: x[1].positive, reverse=True):
+                if b.positive > 0 and tid not in self._used_seeds and tid.startswith(("youtube:", "yt:")):
+                    self._used_seeds.add(tid)
+                    return clean_track_id(tid)
+
+        return None
+
+    async def _gen_ytm_radio(
+        self, seed: Optional[Song], profile: Optional[UserTasteProfile]
+    ) -> List[Song]:
+        if not hasattr(self.provider, "get_radio_candidates"):
+            return []
+        try:
+            vid = await self._resolve_video_id_for_seed(seed, profile)
+            if not vid:
+                return []
+            return await self.provider.get_radio_candidates(vid, limit=self.budget.ytm_radio)
+        except Exception as e:
+            logger.debug("CandidateBuilder._gen_ytm_radio failed: %s", e)
+            return []
+
+    async def _gen_ytm_related(
+        self, seed: Optional[Song], profile: Optional[UserTasteProfile]
+    ) -> List[Song]:
+        if not hasattr(self.provider, "get_related_candidates"):
+            return []
+        try:
+            vid = await self._resolve_video_id_for_seed(seed, profile)
+            if not vid:
+                return []
+            return await self.provider.get_related_candidates(vid, limit=self.budget.ytm_related)
+        except Exception as e:
+            logger.debug("CandidateBuilder._gen_ytm_related failed: %s", e)
+            return []
+
+    async def _gen_ytm_artist(
+        self, seed: Optional[Song], profile: Optional[UserTasteProfile]
+    ) -> List[Song]:
+        if not hasattr(self.provider, "get_artist_candidates"):
+            return []
+        try:
+            artist_target = ""
+            if seed and hasattr(seed, "artists") and seed.artists:
+                first = seed.artists[0]
+                artist_target = getattr(first, "name", "") if hasattr(first, "name") else str(first)
+            elif seed and getattr(seed, "subtitle", None):
+                artist_target = seed.subtitle
+            elif profile and profile.recent_30d.artist:
+                sorted_artists = sorted(profile.recent_30d.artist.items(), key=lambda x: x[1].positive, reverse=True)
+                for aid, b in sorted_artists:
+                    if aid not in self._used_seeds and b.positive > 0:
+                        self._used_seeds.add(aid)
+                        artist_target = aid
+                        break
+            elif profile and profile.long_term.artist:
+                sorted_artists = sorted(profile.long_term.artist.items(), key=lambda x: x[1].positive, reverse=True)
+                for aid, b in sorted_artists:
+                    if aid not in self._used_seeds and b.positive > 0:
+                        self._used_seeds.add(aid)
+                        artist_target = aid
+                        break
+
+            if not artist_target:
+                return []
+            return await self.provider.get_artist_candidates(artist_target, limit=self.budget.ytm_artist)
+        except Exception as e:
+            logger.debug("CandidateBuilder._gen_ytm_artist failed: %s", e)
+            return []
+

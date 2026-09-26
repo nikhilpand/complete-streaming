@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 from .config import QueueWeights
+from .metadata import clean_track_id
 from .models import Track, UserTasteProfile
+from .normalizer import canonical_song_key, is_derivative_track
 from .storage import TasteStore
 
 
@@ -94,46 +96,87 @@ class QueuePlanner:
         count: int = 10,
         surface: str = "queue",
     ) -> List[Track]:
+        curr_key = canonical_song_key(
+            title=getattr(current_track, "title", ""),
+            artist_name=getattr(current_track, "artist_name", ""),
+            fallback_id=getattr(current_track, "id", ""),
+            album=getattr(current_track, "album", ""),
+        )
+        curr_cid = clean_track_id(getattr(current_track, "id", ""))
+        curr_is_derivative = is_derivative_track(
+            getattr(current_track, "title", ""),
+            getattr(current_track, "artist_name", ""),
+        )
+        seen_keys: set[tuple[str, str]] = {curr_key} if curr_key[0] else set()
+        seen_ids: set[str] = {current_track.id}
         scored: list[tuple[Track, float]] = []
-        seen_ids = set()
+
         for cand in candidates:
-            if cand.id == current_track.id or cand.id in seen_ids:
+            if cand.id in seen_ids or (curr_cid and clean_track_id(cand.id) == curr_cid):
                 continue
+            cand_key = canonical_song_key(
+                title=getattr(cand, "title", ""),
+                artist_name=getattr(cand, "artist_name", ""),
+                fallback_id=getattr(cand, "id", ""),
+                album=getattr(cand, "album", ""),
+            )
+            if cand_key[0] and cand_key in seen_keys:
+                continue
+
+            # Filter derivative tracks unless the user is specifically playing a derivative track
+            if not curr_is_derivative and is_derivative_track(getattr(cand, "title", ""), getattr(cand, "artist_name", "")):
+                continue
+
             seen_ids.add(cand.id)
+            if cand_key[0]:
+                seen_keys.add(cand_key)
+
             s = self.score_transition(current_track, cand, profile, store=store)
             if s > -100.0:
                 scored.append((cand, s))
 
         scored.sort(key=lambda x: x[1], reverse=True)
 
+        def _same_artist(t1: Track, t2: Track) -> bool:
+            if not t1 or not t2:
+                return False
+            name1 = (t1.artist_name or "").lower().strip()
+            name2 = (t2.artist_name or "").lower().strip()
+            if name1 and name2 and name1 == name2:
+                return True
+            id1 = (t1.artist_id or "").lower().strip()
+            id2 = (t2.artist_id or "").lower().strip()
+            if id1 and id2 and id1 not in ("sub_artist", "unknown", "artist_unknown", "") and id1 == id2:
+                return True
+            return False
+
         # Sequence construction with surface-specific anti-clustering
         max_consecutive = 1 if surface != "artist_radio" else 3
         sequence: List[Track] = []
         remaining = [t for t, _ in scored]
 
-        prev_artist = (current_track.artist_id or current_track.artist_name.lower().strip()) if current_track else ""
-        consecutive_same_artist = 1 if prev_artist else 0
+        consecutive_same_artist = 1 if current_track else 0
+        last_track = current_track
 
         while remaining and len(sequence) < count:
             pick_idx = None
             for idx, cand in enumerate(remaining):
-                cand_artist = cand.artist_id or cand.artist_name.lower().strip()
-                if cand_artist and cand_artist == prev_artist and consecutive_same_artist >= max_consecutive:
+                if last_track and _same_artist(cand, last_track) and consecutive_same_artist >= max_consecutive:
                     continue
                 pick_idx = idx
                 break
 
             if pick_idx is None:
+                # If only same-artist tracks remain, pick the first
                 pick_idx = 0
 
             chosen = remaining.pop(pick_idx)
-            chosen_artist = chosen.artist_id or chosen.artist_name.lower().strip()
-            if chosen_artist and chosen_artist == prev_artist:
+            if last_track and _same_artist(chosen, last_track):
                 consecutive_same_artist += 1
             else:
                 consecutive_same_artist = 1
-                prev_artist = chosen_artist
 
+            last_track = chosen
             sequence.append(chosen)
 
         return sequence

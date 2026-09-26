@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Optional
 
 from .config import RecommendationWeights
@@ -172,3 +173,147 @@ class EventNormalizer:
             return -1.5
 
         return 0.5
+
+
+DERIVATIVE_PATTERNS = (
+    r"\bworkout\b",
+    r"\b\d+\s*bpm\b",
+    r"\bsped\s*up\b",
+    r"\bspeed\s*up\b",
+    r"\bslowed\b",
+    r"\breverb\b",
+    r"\bnightcore\b",
+    r"\b8d\s*(?:audio)?\b",
+    r"\b16d\s*(?:audio)?\b",
+    r"\bkaraoke\b",
+    r"\binstrumental\b",
+    r"\bcover\b",
+    r"\btribute\b",
+    r"\bunplugged\s*remix\b",
+    r"\bdrum\s*version\b",
+    r"\bpiano\s*version\b",
+    r"\bmashup\b",
+    r"\blo-?fi\b",
+)
+
+
+def is_derivative_track(title: Optional[str], artist: Optional[str] = "") -> bool:
+    """Detect whether a track is an altered derivative upload (sped up, slowed, workout, cover, etc.)."""
+    full_text = f"{title or ''} {artist or ''}".lower()
+    for pat in DERIVATIVE_PATTERNS:
+        if re.search(pat, full_text):
+            return True
+    return False
+
+
+def normalize_title(title: Optional[str]) -> str:
+    """Normalize a song title by stripping extraneous version tags, features, derivatives, and punctuation."""
+    if not title:
+        return ""
+    t = str(title).lower()
+    # Strip (feat. ...), [feat. ...], {feat ...}
+    t = re.sub(r'[\(\[\{]\s*(?:feat|ft|featuring|with)\b[^\)\]\}]*[\)\]\}]', '', t)
+    # Strip (from ...), [from ...]
+    t = re.sub(r'[\(\[\{]\s*from\b[^\)\]\}]*[\)\]\}]', '', t)
+    # Strip (official ...), [official ...]
+    t = re.sub(r'[\(\[\{]\s*official\b[^\)\]\}]*[\)\]\}]', '', t)
+    # Strip (remastered ...), [remastered ...]
+    t = re.sub(r'[\(\[\{]\s*remastered\b[^\)\]\}]*[\)\]\}]', '', t)
+    # Strip (lyrics ...), [lyrics ...]
+    t = re.sub(r'[\(\[\{]\s*lyrics?\b[^\)\]\}]*[\)\]\}]', '', t)
+    # Strip (workout ...), (sped up ...), (slowed ...), (remix ...), (cover ...), etc.
+    t = re.sub(r'[\(\[\{]\s*(?:workout|super speed up|speed up|sped up|slowed\s*\+?\s*reverb|slowed|reverb|acoustic|unplugged|cover|instrumental|karaoke|remix|version|mix)\b[^\)\]\}]*[\)\]\}]', '', t)
+    # Strip trailing - single, - ep, - original, - remastered, - deluxe, - audio, - video, etc.
+    t = re.sub(r'-\s*(?:single|ep|original|remastered|deluxe|audio|video|lyrics?|soundtrack|ost|bonus\s+track|workout|super speed up|speed up|sped up|slowed|reverb|acoustic|unplugged|cover|instrumental|karaoke|remix)\b.*$', '', t)
+    # Strip non-alphanumeric except spaces
+    t = re.sub(r'[^\w\s]', ' ', t)
+    return " ".join(t.split())
+
+
+def extract_artists(
+    artist_name: Optional[str],
+    subtitle: Optional[str] = "",
+    title: Optional[str] = "",
+    album: Optional[str] = "",
+) -> list[str]:
+    """Extract individual normalized artist names from artist_name and subtitle, disambiguating album parts."""
+    combined = f"{artist_name or ''} {subtitle or ''}".strip()
+    if not combined:
+        return []
+
+    parts = [p.strip() for p in re.split(r'[\u00b7\u2022\u2023\u25e6\u2043\u2219•·|]', combined) if p.strip()]
+    norm_t = normalize_title(title)
+    norm_alb = normalize_title(album)
+
+    if len(parts) > 1:
+        p0_norm = normalize_title(parts[0])
+        p_last_norm = normalize_title(parts[-1])
+        # If last part matches or contains title, first part is the artist! (e.g. "Ravyn Lenae · Love Me Not")
+        if norm_t and (p_last_norm == norm_t or norm_t in p_last_norm):
+            artist_text = parts[0]
+        # If first part matches title, artist is in the last part
+        elif norm_t and (p0_norm == norm_t or norm_t in p0_norm):
+            artist_text = parts[-1]
+        # If last part matches or contains album name, first part is artist! (e.g. "Ravyn Lenae · Bird's Eye")
+        elif norm_alb and (p_last_norm == norm_alb or norm_alb in p_last_norm):
+            artist_text = parts[0]
+        elif norm_alb and (p0_norm == norm_alb or norm_alb in p0_norm):
+            artist_text = parts[-1]
+        elif "," in parts[-1] or "&" in parts[-1]:
+            artist_text = parts[-1]
+        elif "," in parts[0] or "&" in parts[0]:
+            artist_text = parts[0]
+        else:
+            # Default JioSaavn format: Artist · Album
+            artist_text = parts[0]
+    else:
+        artist_text = parts[0]
+
+    names = re.split(r'[,;/]|&|\band\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b', artist_text)
+    result = []
+    for n in names:
+        cl = re.sub(r'[^\w\s]', ' ', n.lower()).strip()
+        cl = " ".join(cl.split())
+        if cl and cl not in ("sub artist", "unknown", "unknown artist", "none", "null") and not cl.startswith("track "):
+            if norm_t and (cl == norm_t or norm_t in cl):
+                continue
+            if norm_alb and (cl == norm_alb or norm_alb in cl):
+                continue
+            if cl not in result:
+                result.append(cl)
+    return result
+
+
+def normalize_artist(artist_name: Optional[str]) -> str:
+    """Extract and normalize the primary artist name, handling YT/JioSaavn subtitle variations."""
+    if not artist_name:
+        return ""
+    arts = extract_artists(artist_name)
+    if arts:
+        return arts[0]
+    art = str(artist_name).lower().strip()
+    art = re.split(r'[\u00b7\u2022\u2023\u25e6\u2043\u2219•·|]', art)[0]
+    art = re.split(r'[,;/]|&|\band\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b', art)[0]
+    art = re.sub(r'[^\w\s]', ' ', art)
+    return " ".join(art.split())
+
+
+def canonical_song_key(
+    title: Optional[str],
+    artist_name: Optional[str] = "",
+    fallback_id: Optional[str] = None,
+    subtitle: Optional[str] = "",
+    album: Optional[str] = "",
+) -> tuple[str, str]:
+    """Derive canonical (normalized_title, normalized_primary_artist) identity key."""
+    t_norm = normalize_title(title)
+    arts = extract_artists(artist_name, subtitle=subtitle, title=title, album=album)
+    if arts:
+        # Sort artists to ensure consistent canonical key regardless of ordering differences in multi-artist credits
+        a_norm = sorted(arts)[0]
+    else:
+        a_norm = normalize_artist(artist_name)
+    if not t_norm:
+        return (fallback_id or "", a_norm)
+    return (t_norm, a_norm)
+

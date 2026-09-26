@@ -415,6 +415,26 @@ def parse_search_raw(raw: dict, query: str) -> dict:
             item.get("singers") or
             item.get("firstname")
         )
+        more_info = item.get("more_info") or {}
+        primary_artists = (
+            more_info.get("primary_artists")
+            or more_info.get("singers")
+            or item.get("primary_artists")
+            or item.get("singers")
+        )
+        album = item.get("album") or more_info.get("album")
+        ctr = item.get("ctr") or more_info.get("ctr")
+
+        extra = {}
+        if album:
+            extra["album"] = _html_clean(album)
+        if primary_artists:
+            extra["primary_artists"] = _html_clean(primary_artists)
+        if ctr is not None:
+            c = _safe_int(ctr)
+            if c is not None:
+                extra["ctr"] = c
+
         return {
             "id": item_id,
             "type": item.get("type") or item_type,
@@ -422,6 +442,7 @@ def parse_search_raw(raw: dict, query: str) -> dict:
             "subtitle": subtitle,
             "image": _hi_res_image(item.get("image")),
             "perma_url": item.get("perma_url"),
+            "extra": extra,
         }
 
     songs = [r for i in _items("songs") if (r := _parse_item(i, "song"))]

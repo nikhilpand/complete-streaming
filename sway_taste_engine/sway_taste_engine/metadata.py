@@ -69,10 +69,27 @@ def extract_track_features(song: Any) -> Track:
             "artwork_url": getattr(song, "artwork_url", None),
             "extra": getattr(song, "extra", {}),
             "popularity": getattr(song, "popularity", None),
+            "provider": getattr(song, "provider", None),
+            "has_media": getattr(song, "has_media", None),
         }
 
-    raw_id = raw.get("provider_id") or raw.get("id") or "unknown"
-    track_id = clean_track_id(str(raw_id))
+    raw_id = raw.get("id") or raw.get("provider_id") or "unknown"
+    raw_prov = raw.get("provider") or getattr(song, "provider", None)
+    if not raw_prov:
+        if str(raw_id).startswith(("youtube:", "yt:")):
+            raw_prov = "youtube"
+        else:
+            raw_prov = "saavn"
+
+    raw_pid = raw.get("provider_id") or getattr(song, "provider_id", None) or clean_track_id(str(raw_id))
+    has_media_val = raw.get("has_media") if raw.get("has_media") is not None else getattr(song, "has_media", True)
+    if has_media_val is None:
+        has_media_val = True
+
+    if raw_prov == "youtube":
+        track_id = f"youtube:{clean_track_id(str(raw_pid))}"
+    else:
+        track_id = clean_track_id(str(raw_id))
 
     title = str(raw.get("title") or "Track").strip()
     album_name = raw.get("album")
@@ -224,4 +241,7 @@ def extract_track_features(song: Any) -> Track:
         bpm=bpm_feature.value,
         energy_feature=energy_feature,
         bpm_feature=bpm_feature,
+        provider=raw_prov,
+        provider_id=str(raw_pid),
+        has_media=has_media_val,
     )

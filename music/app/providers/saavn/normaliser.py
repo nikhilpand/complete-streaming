@@ -234,6 +234,7 @@ def norm_search(parsed: dict) -> SearchResults:
                 subtitle=i.get("subtitle"),
                 artwork_url=i.get("image"),
                 perma_url=i.get("perma_url"),
+                extra=i.get("extra") or {},
             ))
         return result
 

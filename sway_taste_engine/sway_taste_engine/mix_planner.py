@@ -4,7 +4,20 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 from .models import PersonalizationState, Track, UserTasteProfile
+from .normalizer import canonical_song_key, normalize_artist, normalize_title, is_derivative_track
 from .storage import TasteStore
+
+
+def get_track_canonical_key(t: Track) -> tuple[str, str]:
+    """Derive canonical (normalized_title, normalized_primary_artist) key for a Track."""
+    primary_name = ""
+    if t.artists and len(t.artists) > 0:
+        primary_name = t.artists[0].name
+    if not primary_name and t.artist_name:
+        primary_name = t.artist_name
+    sub = getattr(t, "subtitle", "") or ""
+    alb = getattr(t, "album_name", "") or getattr(t, "album", "") or ""
+    return canonical_song_key(t.title, primary_name, fallback_id=t.id, subtitle=sub, album=alb)
 
 # Contemporary Indian artist clusters for natural expansion
 CONTEMPORARY_ARTISTS: dict[str, list[str]] = {
@@ -39,23 +52,51 @@ class MixPlanner:
         self,
         candidates: List[Track],
         limit: int = 10,
-        max_per_artist: int = 3,
+        max_per_artist: int = 2,
         exclude_ids: Optional[Set[str]] = None,
+        exclude_song_keys: Optional[Set[tuple[str, str]]] = None,
+        exclude_titles: Optional[Set[str]] = None,
     ) -> List[Track]:
-        """Deduplicate candidates, respect artist diversity caps, and exclude used tracks."""
+        """Deduplicate candidates by ID, canonical song key, and normalized title, respect artist diversity caps, and exclude used tracks and derivatives."""
         result: List[Track] = []
         artist_counts: Counter[str] = Counter()
         seen_ids: Set[str] = set(exclude_ids) if exclude_ids is not None else set()
+        seen_song_keys: Set[tuple[str, str]] = set(exclude_song_keys) if exclude_song_keys is not None else set()
+        seen_titles: Set[str] = set(exclude_titles) if exclude_titles is not None else set()
 
         for t in candidates:
+            if is_derivative_track(t.title, t.artist_name):
+                continue
+
             if t.id in seen_ids:
                 continue
-            aid = t.artist_id or (t.artist_name.lower().strip() if t.artist_name else "unknown")
-            if artist_counts[aid] >= max_per_artist:
+
+            song_key = get_track_canonical_key(t)
+            if song_key in seen_song_keys:
                 continue
+
+            norm_t = normalize_title(t.title)
+            if norm_t and norm_t in seen_titles:
+                continue
+
+            # Canonical artist for diversity capping across provider ID mismatches
+            canonical_art = normalize_artist(t.artist_name or "")
+            if not canonical_art and t.artists and len(t.artists) > 0:
+                canonical_art = normalize_artist(t.artists[0].name)
+            if not canonical_art and t.artist_id:
+                canonical_art = t.artist_id.lower().strip()
+            if not canonical_art:
+                canonical_art = "unknown"
+
+            if artist_counts[canonical_art] >= max_per_artist:
+                continue
+
             result.append(t)
             seen_ids.add(t.id)
-            artist_counts[aid] += 1
+            seen_song_keys.add(song_key)
+            if norm_t:
+                seen_titles.add(norm_t)
+            artist_counts[canonical_art] += 1
             if len(result) >= limit:
                 break
 
@@ -70,14 +111,19 @@ class MixPlanner:
         if not catalog:
             return []
 
-        # Filter unplayable, mock/fixture, and explicitly negative tracks
+        # Filter unplayable, mock/fixture, synthetic IDs, un-enriched, missing artwork, and explicitly negative tracks
         playable_catalog = [
             t
             for t in catalog
             if t.playable
+            and (t.artwork_url and str(t.artwork_url).strip())
+            and not (t.title and t.title.lower().strip().startswith("track "))
             and not (t.title and "sample track" in t.title.lower())
-            and not (t.artist_name and "artist 0" in t.artist_name.lower())
-            and not (t.id and t.id.startswith("track_seed_"))
+            and not (t.title and t.title.lower().startswith("debug"))
+            and not (t.artist_name and t.artist_name.lower().strip() in ("unknown artist", "unknown", "artist 0", "none", "null", ""))
+            and not (t.artist_id and (t.artist_id.lower().strip() in ("artist_unknown", "unknown", "none", "null", "") or t.artist_id.lower().startswith("unknown")))
+            and not (t.id and (t.id.startswith("track_seed_") or t.id.startswith("debug")))
+            and not is_derivative_track(t.title, t.artist_name)
             and t.id not in profile.explicit_negative_tracks
             and t.artist_id not in profile.explicit_negative_artists
             and t.id not in profile.negative_memory.high_confidence_skips
@@ -89,15 +135,26 @@ class MixPlanner:
         state = profile.personalization_state
         shelves: List[HomeShelf] = []
         used_ids: Set[str] = set()
+        used_song_keys: Set[tuple[str, str]] = set()
+        used_titles: Set[str] = set()
 
         if state == PersonalizationState.COLD:
             # ── COLD START: Discovery-first, high variety, zero fake data ──
 
             # 1. Trending Now
             trending_candidates = sorted(playable_catalog, key=lambda t: t.popularity, reverse=True)
-            trending_items = self._pick_tracks(trending_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+            trending_items = self._pick_tracks(
+                trending_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if trending_items:
                 used_ids.update(t.id for t in trending_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in trending_items)
+                used_titles.update(normalize_title(t.title) for t in trending_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_trending",
@@ -121,9 +178,18 @@ class MixPlanner:
             regional_candidates.sort(key=lambda t: t.popularity, reverse=True)
             if not regional_candidates:
                 regional_candidates = trending_candidates
-            regional_items = self._pick_tracks(regional_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+            regional_items = self._pick_tracks(
+                regional_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if regional_items:
                 used_ids.update(t.id for t in regional_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in regional_items)
+                used_titles.update(normalize_title(t.title) for t in regional_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_popular_india",
@@ -142,9 +208,18 @@ class MixPlanner:
                 key=lambda t: (t.release_ts or 0.0, t.year or 0, t.popularity),
                 reverse=True,
             )
-            new_items = self._pick_tracks(new_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+            new_items = self._pick_tracks(
+                new_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if new_items:
                 used_ids.update(t.id for t in new_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in new_items)
+                used_titles.update(normalize_title(t.title) for t in new_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_new_releases",
@@ -163,9 +238,18 @@ class MixPlanner:
                 key=lambda t: (1.0 - abs(t.popularity - 0.5)),
                 reverse=True,
             )
-            discover_items = self._pick_tracks(discover_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+            discover_items = self._pick_tracks(
+                discover_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if discover_items:
                 used_ids.update(t.id for t in discover_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in discover_items)
+                used_titles.update(normalize_title(t.title) for t in discover_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_discovery",
@@ -188,9 +272,18 @@ class MixPlanner:
             chill_candidates.sort(key=lambda t: t.popularity, reverse=True)
             if not chill_candidates:
                 chill_candidates = playable_catalog
-            chill_items = self._pick_tracks(chill_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+            chill_items = self._pick_tracks(
+                chill_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if chill_items:
                 used_ids.update(t.id for t in chill_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in chill_items)
+                used_titles.update(normalize_title(t.title) for t in chill_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_chill_picks",
@@ -211,26 +304,42 @@ class MixPlanner:
             if profile.recent_tracks:
                 for r_id in profile.recent_tracks:
                     if r_id in track_map:
-                        ref_track = track_map[r_id]
-                        break
+                        t = track_map[r_id]
+                        if not t.title.lower().strip().startswith("track ") and t.artist_name.lower().strip() not in ("unknown artist", "unknown", ""):
+                            ref_track = t
+                            break
             if not ref_track and playable_catalog:
                 # Top track with positive affinity
                 for tid, b in sorted(profile.recent_30d.track.items(), key=lambda x: x[1].positive, reverse=True):
                     if tid in track_map and b.positive > 0:
-                        ref_track = track_map[tid]
-                        break
+                        t = track_map[tid]
+                        if not t.title.lower().strip().startswith("track ") and t.artist_name.lower().strip() not in ("unknown artist", "unknown", ""):
+                            ref_track = t
+                            break
 
-            top_artist_name = "Your Artists"
+            top_artist_name = ""
             top_artist_id = None
             if profile.artist:
                 sorted_artists = sorted(profile.artist.items(), key=lambda x: x[1].net, reverse=True)
-                if sorted_artists and sorted_artists[0][1].net > 0:
-                    top_artist_id = sorted_artists[0][0]
+                for a_id, b in sorted_artists:
+                    if b.net <= 0 or not a_id:
+                        continue
+                    a_clean = a_id.lower().strip()
+                    if a_clean in ("artist_unknown", "unknown", "none", "null", "") or a_clean.startswith("unknown"):
+                        continue
+                    top_artist_id = a_id
+                    break
+
+                if top_artist_id:
                     # Find artist name
                     for t in playable_catalog:
-                        if t.artist_id == top_artist_id or (t.artist_name and t.artist_name.lower() == top_artist_id.lower()):
+                        if t.artist_id == top_artist_id or (t.artist_name and t.artist_name.lower().strip() == top_artist_id.lower().strip()):
                             top_artist_name = t.artist_name
                             break
+                    if not top_artist_name:
+                        cand = top_artist_id.replace("art_", "").replace("_", " ").title()
+                        if cand.lower() not in ("unknown", "artist unknown", ""):
+                            top_artist_name = cand
 
             # 1. Made for You (Personalized Quick Mix)
             quick_candidates: List[Track] = []
@@ -275,9 +384,18 @@ class MixPlanner:
                 else "Your daily personal soundtrack"
             )
 
-            quick_items = self._pick_tracks(quick_candidates, limit=limit_per_shelf, max_per_artist=3, exclude_ids=used_ids)
+            quick_items = self._pick_tracks(
+                quick_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if quick_items:
                 used_ids.update(t.id for t in quick_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in quick_items)
+                used_titles.update(normalize_title(t.title) for t in quick_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_quick_mix",
@@ -291,7 +409,14 @@ class MixPlanner:
                 )
 
             # 2. Because you listened to {RefTrack}
-            if ref_track:
+            is_valid_ref_track = bool(
+                ref_track
+                and ref_track.title
+                and not ref_track.title.lower().strip().startswith("track ")
+                and ref_track.artist_name
+                and ref_track.artist_name.lower().strip() not in ("unknown artist", "unknown", "")
+            )
+            if is_valid_ref_track and ref_track:
                 similar_candidates: List[Track] = []
                 if self.store is not None:
                     edges = self.store.get_top_k_similar_tracks(ref_track.id, k=limit_per_shelf * 2)
@@ -312,17 +437,33 @@ class MixPlanner:
                 genre_matches.sort(key=lambda t: t.popularity, reverse=True)
                 similar_candidates.extend(genre_matches)
 
-                sim_items = self._pick_tracks(similar_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+                sim_items = self._pick_tracks(
+                    similar_candidates,
+                    limit=limit_per_shelf,
+                    max_per_artist=2,
+                    exclude_ids=used_ids,
+                    exclude_song_keys=used_song_keys,
+                    exclude_titles=used_titles,
+                )
                 if len(sim_items) < limit_per_shelf:
                     fallback_sim = [
                         t for t in playable_catalog
-                        if t.id != ref_track.id and t.id not in used_ids
+                        if t.id != ref_track.id and t.id not in used_ids and get_track_canonical_key(t) not in used_song_keys and normalize_title(t.title) not in used_titles
                     ]
-                    more = self._pick_tracks(fallback_sim, limit=limit_per_shelf - len(sim_items), max_per_artist=2, exclude_ids=used_ids)
+                    more = self._pick_tracks(
+                        fallback_sim,
+                        limit=limit_per_shelf - len(sim_items),
+                        max_per_artist=2,
+                        exclude_ids=used_ids,
+                        exclude_song_keys=used_song_keys,
+                        exclude_titles=used_titles,
+                    )
                     sim_items.extend(more)
 
                 if sim_items:
                     used_ids.update(t.id for t in sim_items)
+                    used_song_keys.update(get_track_canonical_key(t) for t in sim_items)
+                    used_titles.update(normalize_title(t.title) for t in sim_items if normalize_title(t.title))
                     shelves.append(
                         HomeShelf(
                             id="shelf_similarity",
@@ -336,11 +477,19 @@ class MixPlanner:
                     )
 
             # 3. More from {TopArtist} (Artist Radar)
-            if top_artist_id or (fav_artist_tracks and fav_artist_tracks[0].artist_name):
+            is_valid_radar_artist = bool(
+                top_artist_id
+                and top_artist_name
+                and top_artist_name.lower().strip() not in ("your artists", "unknown artist", "unknown", "artist unknown", "")
+            )
+            if is_valid_radar_artist:
                 radar_candidates: List[Track] = []
                 # Direct artist tracks
                 if top_artist_id:
-                    artist_tracks = [t for t in playable_catalog if t.artist_id == top_artist_id]
+                    artist_tracks = [
+                        t for t in playable_catalog 
+                        if t.artist_id == top_artist_id or (t.artist_name and t.artist_name.lower().strip() == top_artist_name.lower().strip())
+                    ]
                     radar_candidates.extend(artist_tracks)
 
                 # Related artists
@@ -351,17 +500,18 @@ class MixPlanner:
                     rel_tracks.sort(key=lambda t: t.popularity, reverse=True)
                     radar_candidates.extend(rel_tracks)
 
-                radar_items = self._pick_tracks(radar_candidates, limit=limit_per_shelf, max_per_artist=4, exclude_ids=used_ids)
-                if len(radar_items) < limit_per_shelf:
-                    fallback_radar = [
-                        t for t in playable_catalog
-                        if t.id not in used_ids
-                    ]
-                    more_radar = self._pick_tracks(fallback_radar, limit=limit_per_shelf - len(radar_items), max_per_artist=3, exclude_ids=used_ids)
-                    radar_items.extend(more_radar)
-
-                if radar_items:
+                radar_items = self._pick_tracks(
+                    radar_candidates,
+                    limit=limit_per_shelf,
+                    max_per_artist=3,
+                    exclude_ids=used_ids,
+                    exclude_song_keys=used_song_keys,
+                    exclude_titles=used_titles,
+                )
+                if len(radar_items) >= 3:
                     used_ids.update(t.id for t in radar_items)
+                    used_song_keys.update(get_track_canonical_key(t) for t in radar_items)
+                    used_titles.update(normalize_title(t.title) for t in radar_items if normalize_title(t.title))
                     shelves.append(
                         HomeShelf(
                             id="shelf_artist_radar",
@@ -378,10 +528,24 @@ class MixPlanner:
             if state in {PersonalizationState.LEARNING, PersonalizationState.PERSONALIZED} and profile.recent_tracks:
                 recent_items: List[Track] = []
                 seen_recent_ids: Set[str] = set()
+                seen_recent_keys: Set[tuple[str, str]] = set()
+                seen_recent_titles: Set[str] = set()
                 for tid in profile.recent_tracks:
                     if tid in track_map and tid not in seen_recent_ids:
-                        recent_items.append(track_map[tid])
+                        t = track_map[tid]
+                        if is_derivative_track(t.title, t.artist_name):
+                            continue
+                        norm_t = normalize_title(t.title)
+                        if norm_t and norm_t in seen_recent_titles:
+                            continue
+                        k = get_track_canonical_key(t)
+                        if k in seen_recent_keys:
+                            continue
+                        recent_items.append(t)
                         seen_recent_ids.add(tid)
+                        seen_recent_keys.add(k)
+                        if norm_t:
+                            seen_recent_titles.add(norm_t)
                     if len(recent_items) >= limit_per_shelf:
                         break
 
@@ -407,9 +571,18 @@ class MixPlanner:
                     and t.artist_id in profile.artist
                     and profile.artist[t.artist_id].positive > 0
                 ]
-                rediscover_items = self._pick_tracks(rediscover_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+                rediscover_items = self._pick_tracks(
+                    rediscover_candidates,
+                    limit=limit_per_shelf,
+                    max_per_artist=2,
+                    exclude_ids=used_ids,
+                    exclude_song_keys=used_song_keys,
+                    exclude_titles=used_titles,
+                )
                 if rediscover_items:
                     used_ids.update(t.id for t in rediscover_items)
+                    used_song_keys.update(get_track_canonical_key(t) for t in rediscover_items)
+                    used_titles.update(normalize_title(t.title) for t in rediscover_items if normalize_title(t.title))
                     shelves.append(
                         HomeShelf(
                             id="shelf_rediscover",
@@ -424,9 +597,18 @@ class MixPlanner:
 
             # 6. Trending (Always included for grounding)
             trending_candidates = sorted(playable_catalog, key=lambda t: t.popularity, reverse=True)
-            trending_items = self._pick_tracks(trending_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+            trending_items = self._pick_tracks(
+                trending_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if trending_items:
                 used_ids.update(t.id for t in trending_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in trending_items)
+                used_titles.update(normalize_title(t.title) for t in trending_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_trending",
@@ -451,9 +633,18 @@ class MixPlanner:
             if not discover_candidates:
                 discover_candidates = playable_catalog
 
-            discover_items = self._pick_tracks(discover_candidates, limit=limit_per_shelf, max_per_artist=2, exclude_ids=used_ids)
+            discover_items = self._pick_tracks(
+                discover_candidates,
+                limit=limit_per_shelf,
+                max_per_artist=2,
+                exclude_ids=used_ids,
+                exclude_song_keys=used_song_keys,
+                exclude_titles=used_titles,
+            )
             if discover_items:
                 used_ids.update(t.id for t in discover_items)
+                used_song_keys.update(get_track_canonical_key(t) for t in discover_items)
+                used_titles.update(normalize_title(t.title) for t in discover_items if normalize_title(t.title))
                 shelves.append(
                     HomeShelf(
                         id="shelf_discovery",

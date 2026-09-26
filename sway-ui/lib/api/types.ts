@@ -15,6 +15,7 @@ export interface Song {
   type: 'song';
   title: string;
   subtitle?: string;
+  artist_name?: string;
   artists?: ArtistSummary[];
   featured_artists?: ArtistSummary[];
   album?: string;

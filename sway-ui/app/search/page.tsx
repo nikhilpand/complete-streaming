@@ -69,8 +69,49 @@ export default function SearchPage() {
     if (s.provider_id) enrichedMap.set(s.provider_id, s);
   });
 
-  // Preserve the exact ranking and full list of songs
-  const songObjects: Song[] = songs.map((s) => enrichedMap.get(s.id) || enrichedMap.get(s.provider_id) || searchItemToSong(s));
+  // Preserve the exact ranking while deduplicating identical song variants
+  const DERIVATIVE_REGEX = /\b(workout|bpm|sped\s*up|speed\s*up|super\s*speed\s*up|slowed|reverb|nightcore|8d(?:\s*audio)?|16d(?:\s*audio)?|karaoke|instrumental|cover|tribute|unplugged(?:\s*remix)?|drum\s*version|piano\s*version|mashup|lo-?fi)\b/i;
+  const qLower = query.toLowerCase();
+  const queryHasDeriv = DERIVATIVE_REGEX.test(qLower) || qLower.includes('remix') || qLower.includes('cover');
+  const cleanQuery = qLower.replace(/[\(\[\{].*?[\)\]\}]/g, '').replace(/[^\w\s]/g, '').trim();
+
+  const seenSongKeys = new Set<string>();
+  const seenTitlesCount = new Map<string, number>();
+  const songObjects: Song[] = [];
+
+  for (const s of songs) {
+    const song = enrichedMap.get(s.id) || enrichedMap.get(s.provider_id) || searchItemToSong(s);
+    if (!song.title) continue;
+
+    // Filter derivative songs unless explicitly queried
+    if (!queryHasDeriv && (DERIVATIVE_REGEX.test(song.title) || (song.subtitle && DERIVATIVE_REGEX.test(song.subtitle)))) {
+      continue;
+    }
+
+    const cleanTitle = (song.title || '').toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').replace(/[^\w\s]/g, '').trim();
+    const rawArtist = song.artists?.[0]?.name || s.subtitle || '';
+    const cleanArtist = rawArtist.toLowerCase().split(/[,·•|&]/)[0].replace(/[^\w\s]/g, '').trim();
+    const key = `${cleanTitle}::${cleanArtist}`;
+
+    if (cleanTitle && seenSongKeys.has(key)) {
+      continue;
+    }
+
+    // Deduplicate duplicate titles: if exact match to query, allow only 1! Otherwise at most 2.
+    const titleCount = seenTitlesCount.get(cleanTitle) || 0;
+    if (cleanTitle && cleanTitle === cleanQuery && titleCount >= 1) {
+      continue;
+    }
+    if (cleanTitle && titleCount >= 2) {
+      continue;
+    }
+
+    if (cleanTitle) {
+      seenSongKeys.add(key);
+      seenTitlesCount.set(cleanTitle, titleCount + 1);
+    }
+    songObjects.push(song);
+  }
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'all', label: 'All' },

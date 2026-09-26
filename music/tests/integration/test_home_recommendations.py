@@ -173,3 +173,107 @@ def test_06_queue_api_anti_clustering(client):
             curr_artist = t.get("artist_name")
             assert curr_artist != prev_artist, f"Queue clustered consecutive same artist: {curr_artist}"
             prev_artist = curr_artist
+
+
+def test_07_unknown_telemetry_track_does_not_create_fake_catalog_metadata(client):
+    """Telemetry ingestion for an unknown track must not create fabricated catalog metadata."""
+    from app.routers.recommendations import get_taste_engine
+
+    engine = get_taste_engine()
+    uid = f"telemetry_check_{uuid.uuid4().hex[:8]}"
+    unknown_id = f"unknown_track_{uuid.uuid4().hex[:8]}"
+
+    # Send event for unknown track
+    res = client.post(
+        "/api/v1/recommendations/events",
+        json={
+            "user_id": uid,
+            "track_id": unknown_id,
+            "event_type": "play_started",
+            "position_ms": 0,
+        },
+    )
+    assert res.status_code == 200
+    assert res.json().get("ok") is True
+
+    # Catalog check: unknown track must either be absent or contain NO fake defaults (energy=0.6, bpm=110.0, popularity=0.85)
+    stored = engine.store.get_track(unknown_id)
+    if stored is not None:
+        assert stored.energy != 0.6 or stored.genres != ["pop"]
+        assert stored.moods != ["chill"]
+
+
+def test_08_cold_user_receives_factual_provider_and_media_fields(client):
+    """Cold user receives discovery items with factual provider, provider_id, and has_media."""
+    uid = f"cold_facts_{uuid.uuid4().hex[:8]}"
+    headers = {"x-sway-user-id": uid}
+    res = client.get("/api/v1/home", headers=headers)
+    assert res.status_code == 200
+    data = res.json()["data"]
+
+    for shelf in data["shelves"]:
+        for item in shelf["items"]:
+            assert item.get("provider") in {"jiosaavn", "saavn", "youtube"}
+            assert item.get("provider_id")
+            assert isinstance(item.get("has_media"), bool)
+            assert "Sample Track" not in item.get("title", "")
+            assert "Artist 0" not in item.get("artist_name", "")
+
+
+def test_09_disliked_track_excluded_from_home_and_queue(client):
+    """Explicitly disliked track is pruned from future Home shelves and queue suggestions."""
+    uid = f"dislike_user_{uuid.uuid4().hex[:8]}"
+    headers = {"x-sway-user-id": uid}
+
+    r1 = client.get("/api/v1/home", headers=headers)
+    assert r1.status_code == 200
+    shelves = r1.json()["data"]["shelves"]
+    assert len(shelves) > 0 and len(shelves[0]["items"]) > 0
+
+    disliked_track = shelves[0]["items"][0]
+    disliked_id = disliked_track["id"]
+
+    # Post explicit dislike
+    evt_res = client.post(
+        "/api/v1/recommendations/events",
+        json={
+            "user_id": uid,
+            "track_id": disliked_id,
+            "event_type": "dislike",
+        },
+    )
+    assert evt_res.status_code == 200
+
+    # Fetch home again: disliked track must not appear in any shelf
+    r2 = client.get("/api/v1/home", headers=headers)
+    assert r2.status_code == 200
+    for s in r2.json()["data"]["shelves"]:
+        for it in s["items"]:
+            assert it["id"] != disliked_id, f"Disliked track {disliked_id} appeared on shelf {s['title']}"
+
+    # Queue next must also not return the disliked track
+    q_res = client.get(
+        f"/api/v1/queue/next?current_track_id={shelves[0]['items'][-1]['id']}&count=10",
+        headers=headers,
+    )
+    assert q_res.status_code == 200
+    q_tracks = q_res.json().get("data", {}).get("queue", [])
+    for qt in q_tracks:
+        assert qt["id"] != disliked_id, f"Disliked track {disliked_id} appeared in queue"
+
+
+def test_10_queue_api_factual_provider_fields(client):
+    """Queue next endpoint returns factual provider, provider_id, and has_media fields."""
+    res = client.get("/api/v1/home")
+    first_track = res.json()["data"]["shelves"][0]["items"][0]
+
+    q_res = client.get(f"/api/v1/queue/next?current_track_id={first_track['id']}&count=5")
+    assert q_res.status_code == 200
+    tracks = q_res.json().get("data", {}).get("queue", [])
+    assert len(tracks) > 0
+
+    for t in tracks:
+        assert t.get("provider") in {"jiosaavn", "saavn", "youtube"}
+        assert t.get("provider_id")
+        assert isinstance(t.get("has_media"), bool)
+

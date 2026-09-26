@@ -25,7 +25,7 @@ from app.routers import songs as songs_router
 from app.routers.recommendations import get_taste_engine, song_to_engine_track
 from app.services.candidate_builder import CandidateBuilder
 from sway_taste_engine.config import QueueWeights
-from sway_taste_engine.metadata import extract_track_features
+from sway_taste_engine.metadata import clean_track_id, extract_track_features
 from sway_taste_engine.models import Track, UserTasteProfile
 from sway_taste_engine.queue_planner import QueuePlanner
 
@@ -34,34 +34,43 @@ router = APIRouter(prefix="/queue", tags=["queue"])
 
 
 async def _resolve_song(request: Request, song_id: str) -> Optional[Song]:
+    clean_id = clean_track_id(song_id) if song_id else ""
     # Check monkeypatched or helper in songs router
     if hasattr(songs_router, "get_song_by_id"):
         fn = getattr(songs_router, "get_song_by_id")
-        try:
-            res = fn(song_id)
-            if asyncio.iscoroutine(res):
-                return await res
-            if res:
-                return res
-        except TypeError:
+        for test_id in [clean_id, song_id]:
+            if not test_id:
+                continue
             try:
-                provider = getattr(request.app.state, "provider", None)
-                res = fn(song_id, provider=provider)
+                res = fn(test_id)
                 if asyncio.iscoroutine(res):
-                    return await res
+                    res = await res
+                if res:
+                    return res
+            except TypeError:
+                try:
+                    provider = getattr(request.app.state, "provider", None)
+                    res = fn(test_id, provider=provider)
+                    if asyncio.iscoroutine(res):
+                        res = await res
+                    if res:
+                        return res
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    provider = getattr(request.app.state, "provider", None)
+    if provider:
+        for test_id in [clean_id, song_id]:
+            if not test_id:
+                continue
+            try:
+                res = await provider.get_song(test_id)
                 if res:
                     return res
             except Exception:
                 pass
-        except Exception:
-            pass
-
-    provider = getattr(request.app.state, "provider", None)
-    if provider:
-        try:
-            return await provider.get_song(song_id)
-        except Exception:
-            pass
     return None
 
 
@@ -130,25 +139,46 @@ async def get_next_queue(
         count=count,
     )
 
-    queue_data = [
-        {
-            "id": t.id,
-            "title": t.title,
-            "artist_name": t.artist_name,
-            "artists": (
-                [{"id": a.id, "name": a.name, "role": a.role} for a in t.artists]
-                if t.artists
-                else [{"id": t.artist_id, "name": t.artist_name, "role": "primary"}]
-            ),
-            "album": t.album,
-            "year": t.year,
-            "language": t.language,
-            "artwork_url": t.artwork_url,
-            "energy": t.energy,
-            "popularity": t.popularity,
-        }
-        for t in ranked_tracks
-    ]
+    queue_data = []
+    for t in ranked_tracks:
+        prov = getattr(t, "provider", None)
+        p_id = getattr(t, "provider_id", None)
+        if not prov or not p_id:
+            if ":" in t.id:
+                prov, p_id = t.id.split(":", 1)
+            else:
+                prov = "saavn"
+                p_id = t.id
+        full_id = f"{prov}:{p_id}" if prov == "youtube" and not t.id.startswith(("youtube:", "yt:")) else t.id
+        has_media = getattr(t, "has_media", None)
+        if has_media is None:
+            if isinstance(getattr(t, "provider_available", None), dict) and prov in t.provider_available:
+                has_media = t.provider_available[prov]
+            else:
+                has_media = True
+
+        queue_data.append(
+            {
+                "id": full_id,
+                "provider": prov,
+                "provider_id": p_id,
+                "title": t.title,
+                "artist_name": t.artist_name,
+                "artists": (
+                    [{"id": a.id, "name": a.name, "role": a.role, "image_url": a.image_url} for a in t.artists]
+                    if t.artists
+                    else [{"id": t.artist_id, "name": t.artist_name, "role": "primary"}]
+                ),
+                "album": t.album,
+                "year": t.year,
+                "language": t.language,
+                "artwork_url": t.artwork_url,
+                "has_media": has_media,
+                "energy": t.energy,
+                "popularity": t.popularity,
+            }
+        )
+
 
     return APIResponse(
         success=True,

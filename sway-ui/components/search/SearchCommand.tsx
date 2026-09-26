@@ -108,29 +108,60 @@ export function SearchCommand() {
               {results && (
                 <div className="max-h-[65vh] overflow-y-auto">
                   {/* Songs */}
-                  {(results.songs?.length ?? 0) > 0 && (
-                    <div className="py-2">
-                      <p className="text-[10px] font-semibold text-[--muted] uppercase tracking-widest px-4 py-1.5">Songs</p>
-                      {results.songs!.slice(0, 5).map((item, idx) => (
-                        <button
-                          key={`${item.id}-${idx}`}
-                          className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors text-left"
-                          onClick={() => {
-                            // Prefer enriched Song (with proper artists, lyrics_id, duration_ms)
-                            const song = enrichedMap.get(item.id) ?? searchItemToSong(item);
-                            usePlayerStore.getState().setCurrentTrack(song, { source: 'search', query });
-                            setOpen(false);
-                          }}
-                        >
-                          <Artwork src={item.artwork_url} alt={item.title} size={36} className="rounded-[--radius-xs]" />
-                          <div className="min-w-0">
-                            <p className="text-sm text-[--foreground] truncate">{item.title}</p>
-                            <p className="text-xs text-[--muted] truncate">{item.subtitle}</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const DERIVATIVE_REGEX = /\b(workout|bpm|sped\s*up|speed\s*up|super\s*speed\s*up|slowed|reverb|nightcore|8d(?:\s*audio)?|16d(?:\s*audio)?|karaoke|instrumental|cover|tribute|unplugged(?:\s*remix)?|drum\s*version|piano\s*version|mashup|lo-?fi)\b/i;
+                    const qLower = query.toLowerCase();
+                    const queryHasDeriv = DERIVATIVE_REGEX.test(qLower) || qLower.includes('remix') || qLower.includes('cover');
+                    const cleanQuery = qLower.replace(/[\(\[\{].*?[\)\]\}]/g, '').replace(/[^\w\s]/g, '').trim();
+
+                    const seenKeys = new Set<string>();
+                    const seenTitlesCount = new Map<string, number>();
+
+                    const uniqueSongs = (results.songs || []).filter((item) => {
+                      if (!item.title) return false;
+                      if (!queryHasDeriv && (DERIVATIVE_REGEX.test(item.title) || (item.subtitle && DERIVATIVE_REGEX.test(item.subtitle)))) {
+                        return false;
+                      }
+                      const cleanTitle = (item.title || '').toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').replace(/[^\w\s]/g, '').trim();
+                      const cleanArtist = (item.subtitle || '').toLowerCase().split(/[,·•|&]/)[0].replace(/[^\w\s]/g, '').trim();
+                      const key = `${cleanTitle}::${cleanArtist}`;
+                      if (cleanTitle && seenKeys.has(key)) return false;
+
+                      const titleCount = seenTitlesCount.get(cleanTitle) || 0;
+                      if (cleanTitle && cleanTitle === cleanQuery && titleCount >= 1) return false;
+                      if (cleanTitle && titleCount >= 2) return false;
+
+                      if (cleanTitle) {
+                        seenKeys.add(key);
+                        seenTitlesCount.set(cleanTitle, titleCount + 1);
+                      }
+                      return true;
+                    });
+                    if (uniqueSongs.length === 0) return null;
+                    return (
+                      <div className="py-2">
+                        <p className="text-[10px] font-semibold text-[--muted] uppercase tracking-widest px-4 py-1.5">Songs</p>
+                        {uniqueSongs.slice(0, 5).map((item, idx) => (
+                          <button
+                            key={`${item.id}-${idx}`}
+                            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/[0.04] transition-colors text-left"
+                            onClick={() => {
+                              // Prefer enriched Song (with proper artists, lyrics_id, duration_ms)
+                              const song = enrichedMap.get(item.id) ?? searchItemToSong(item);
+                              usePlayerStore.getState().setCurrentTrack(song, { source: 'search', query });
+                              setOpen(false);
+                            }}
+                          >
+                            <Artwork src={item.artwork_url} alt={item.title} size={36} className="rounded-[--radius-xs]" />
+                            <div className="min-w-0">
+                              <p className="text-sm text-[--foreground] truncate">{item.title}</p>
+                              <p className="text-xs text-[--muted] truncate">{item.subtitle}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {/* Artists */}
                   {(results.artists?.length ?? 0) > 0 && (
                     <div className="py-2 border-t border-white/[0.04]">

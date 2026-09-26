@@ -223,7 +223,10 @@ class HorizonTasteState(BaseModel):
 
     @property
     def artist_affinity(self) -> dict[str, float]:
-        return {k: b.net for k, b in self.artist.items()}
+        return {
+            k: b.net for k, b in self.artist.items()
+            if k and k.lower().strip() not in ("artist_unknown", "unknown", "none", "null", "") and not k.lower().startswith("unknown")
+        }
 
     @property
     def genre_affinity(self) -> dict[str, float]:

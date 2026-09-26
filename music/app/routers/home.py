@@ -7,6 +7,7 @@ with zero mock data and natural progressive personalization.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -24,6 +25,7 @@ from app.models import APIResponse
 from app.routers.recommendations import get_taste_engine, song_to_engine_track
 from sway_taste_engine.mix_planner import MixPlanner
 from sway_taste_engine.models import Track
+from sway_taste_engine.normalizer import canonical_song_key, is_derivative_track, normalize_title
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/home", tags=["home"])
@@ -36,38 +38,69 @@ DEFAULT_HOME_QUERIES = [
     "chill acoustic hindi",
 ]
 
+_seed_lock = asyncio.Lock()
+
+
+def is_valid_catalog_track(t: Track) -> bool:
+    """Validate that a track has genuine metadata and artwork before feeding to Home."""
+    if not t or not getattr(t, "id", None):
+        return False
+    if not t.artwork_url or not str(t.artwork_url).strip():
+        return False
+    if is_derivative_track(t.title or "", t.artist_name or ""):
+        return False
+    t_title = (t.title or "").strip().lower()
+    if not t_title or t_title.startswith("track ") or t_title.startswith("sample track") or t_title.startswith("debug"):
+        return False
+    t_artist = (t.artist_name or "").strip().lower()
+    if not t_artist or t_artist in ("unknown artist", "unknown", "artist 0", "none", "null"):
+        return False
+    t_artist_id = (t.artist_id or "").strip().lower()
+    if not t_artist_id or t_artist_id in ("artist_unknown", "unknown", "none", "null") or t_artist_id.startswith("unknown"):
+        return False
+    if t.id.startswith("debug") or t.id.startswith("track_seed_"):
+        return False
+    return True
+
 
 async def _seed_catalog_if_empty(request: Request, engine) -> List[Track]:
-    """Hydrate catalog from provider if store contains fewer than 15 tracks."""
-    catalog = engine.store.all_tracks()
-    if len(catalog) >= 15:
-        return catalog
+    """Hydrate catalog from provider if store contains fewer than 25 valid tracks (with in-flight coalescing)."""
+    valid_catalog = [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
+    if len(valid_catalog) >= 25:
+        return valid_catalog
 
-    provider = getattr(request.app.state, "provider", None)
-    if provider:
-        try:
-            for q in DEFAULT_HOME_QUERIES:
-                res = await provider.search(q, n=10)
-                songs = getattr(res, "enriched_songs", None) or getattr(res, "songs", None) or []
-                if songs:
-                    for s_item in songs:
-                        try:
-                            # If item is already full Song, convert directly
-                            if hasattr(s_item, "duration_ms") and s_item.duration_ms:
-                                track = song_to_engine_track(s_item)
-                            else:
-                                full_song = await provider.get_song(s_item.id)
-                                track = song_to_engine_track(full_song or s_item)
-                            if track and track.id:
-                                engine.store.upsert_tracks([track])
-                        except Exception:
-                            pass
-                if len(engine.store.all_tracks()) >= 30:
-                    break
-        except Exception as e:
-            logger.warning("Could not auto-seed home catalog from provider: %s", e)
+    async with _seed_lock:
+        # Double check after acquiring lock
+        valid_catalog = [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
+        if len(valid_catalog) >= 25:
+            return valid_catalog
 
-    return engine.store.all_tracks()
+        provider = getattr(request.app.state, "provider", None)
+        if provider:
+            try:
+                for q in DEFAULT_HOME_QUERIES:
+                    res = await provider.search(q, n=10)
+                    songs = getattr(res, "enriched_songs", None) or getattr(res, "songs", None) or []
+                    if songs:
+                        for s_item in songs:
+                            try:
+                                # If item is already full Song, convert directly
+                                if hasattr(s_item, "duration_ms") and s_item.duration_ms:
+                                    track = song_to_engine_track(s_item)
+                                else:
+                                    full_song = await provider.get_song(s_item.id)
+                                    track = song_to_engine_track(full_song or s_item)
+                                if track and is_valid_catalog_track(track):
+                                    engine.store.upsert_tracks([track])
+                            except Exception:
+                                pass
+                    valid_catalog = [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
+                    if len(valid_catalog) >= 35:
+                        break
+            except Exception as e:
+                logger.warning("Could not auto-seed home catalog from provider: %s", e)
+
+        return [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
 
 
 @router.get("", response_model=APIResponse, summary="Get personalized multi-shelf home feed")
@@ -94,7 +127,8 @@ async def get_home_feed(
     engine = get_taste_engine()
     profile = engine.store.get_profile(effective_user_id)
 
-    catalog = await _seed_catalog_if_empty(request, engine)
+    raw_catalog = await _seed_catalog_if_empty(request, engine)
+    catalog = [t for t in raw_catalog if is_valid_catalog_track(t)]
 
     # If catalog is still empty (e.g. offline and no provider), return empty shelves without fake mock tracks
     if not catalog:
@@ -112,42 +146,83 @@ async def get_home_feed(
 
     shelves_data = []
     for s in shelves:
-        shelves_data.append(
-            {
-                "id": s.id,
-                "type": s.type,
-                "title": s.title,
-                "subtitle": s.subtitle,
-                "badge": s.badge,
-                "reason": s.reason,
-                "items": [
-                    {
-                        "id": t.id,
-                        "provider": "jiosaavn",
-                        "provider_id": t.id,
-                        "type": "song",
-                        "title": t.title,
-                        "subtitle": t.artist_name,
-                        "artist_name": t.artist_name,
-                        "artists": (
-                            [{"id": a.id, "name": a.name, "role": a.role, "image_url": a.image_url} for a in t.artists]
-                            if t.artists
-                            else [{"id": t.artist_id, "name": t.artist_name, "role": "primary"}]
-                        ),
-                        "album": t.album,
-                        "album_id": t.album_id,
-                        "year": t.year,
-                        "language": t.language,
-                        "duration_ms": t.duration_ms,
-                        "artwork_url": t.artwork_url,
-                        "has_media": True,
-                        "energy": t.energy,
-                        "popularity": t.popularity,
-                    }
-                    for t in s.items
-                ],
-            }
-        )
+        shelf_items = []
+        seen_shelf_song_keys: set[tuple[str, str]] = set()
+        seen_shelf_titles: set[str] = set()
+        for t in s.items:
+            if is_derivative_track(getattr(t, "title", ""), getattr(t, "artist_name", "")):
+                continue
+            norm_title = normalize_title(getattr(t, "title", ""))
+            if norm_title and norm_title in seen_shelf_titles:
+                continue
+            c_key = canonical_song_key(
+                title=getattr(t, "title", ""),
+                artist_name=getattr(t, "artist_name", ""),
+                fallback_id=getattr(t, "id", ""),
+                album=getattr(t, "album", ""),
+            )
+            if c_key in seen_shelf_song_keys:
+                continue
+            seen_shelf_song_keys.add(c_key)
+            if norm_title:
+                seen_shelf_titles.add(norm_title)
+
+            prov = getattr(t, "provider", None)
+            p_id = getattr(t, "provider_id", None)
+            if not prov or not p_id:
+                if ":" in t.id:
+                    prov, p_id = t.id.split(":", 1)
+                else:
+                    prov = "saavn"
+                    p_id = t.id
+
+            full_id = f"{prov}:{p_id}" if prov == "youtube" and not t.id.startswith(("youtube:", "yt:")) else t.id
+            has_media = getattr(t, "has_media", None)
+            if has_media is None:
+                if isinstance(getattr(t, "provider_available", None), dict) and prov in t.provider_available:
+                    has_media = t.provider_available[prov]
+                else:
+                    has_media = True
+
+            shelf_items.append(
+                {
+                    "id": full_id,
+                    "provider": prov,
+                    "provider_id": p_id,
+                    "type": "song",
+                    "title": t.title,
+                    "subtitle": t.artist_name,
+                    "artist_name": t.artist_name,
+                    "artists": (
+                        [{"id": a.id, "name": a.name, "role": a.role, "image_url": a.image_url} for a in t.artists]
+                        if t.artists
+                        else [{"id": t.artist_id, "name": t.artist_name, "role": "primary"}]
+                    ),
+                    "album": t.album,
+                    "album_id": t.album_id,
+                    "year": t.year,
+                    "language": t.language,
+                    "duration_ms": t.duration_ms,
+                    "artwork_url": t.artwork_url,
+                    "has_media": has_media,
+                    "energy": t.energy,
+                    "popularity": t.popularity,
+                }
+            )
+
+        if shelf_items:
+            shelves_data.append(
+                {
+                    "id": s.id,
+                    "type": s.type,
+                    "title": s.title,
+                    "subtitle": s.subtitle,
+                    "badge": s.badge,
+                    "reason": s.reason,
+                    "items": shelf_items,
+                }
+            )
+
 
     return APIResponse(
         success=True,

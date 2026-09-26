@@ -9,11 +9,24 @@ import { scheduleExtract, applyPalette } from '@/lib/color/colorExtractor';
 import { artistNames, artUrl } from '@/lib/utils';
 import type { Song } from '@/lib/api/types';
 
+function getTrackMeta(t: Song | null) {
+  if (!t) return {};
+  const artistName = artistNames(t.artists, t.subtitle);
+  const artistId = t.artists?.[0]?.id || (artistName ? artistName.toLowerCase().replace(/[^a-z0-9]+/g, '_') : undefined);
+  return {
+    title: t.title,
+    artist: artistName,
+    artist_id: artistId,
+    artwork_url: t.artwork_url,
+  };
+}
+
 export function usePlayback() {
   const prevIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastStoreTime = useRef<number>(0);
-  const retryCountRef = useRef<Record<string, number>>({});
+  const playbackGenRef = useRef<number>(0);
+  const retryCountRef = useRef<number>(0);
 
   // Telemetry milestone tracking
   const milestonesFiredRef = useRef<Record<string, boolean>>({});
@@ -52,6 +65,7 @@ export function usePlayback() {
             sendTelemetry({
               event_type: 'play_started',
               track_id: pTrack.id,
+              ...getTrackMeta(pTrack),
               position_ms: Math.round(audioManager.currentTime * 1000) || 0,
               duration_ms: Math.round((audioManager.duration || 0) * 1000) || pTrack.duration_ms,
               source: activeContextRef.current?.source,
@@ -85,6 +99,7 @@ export function usePlayback() {
               sendTelemetry({
                 event_type: 'play_10s',
                 track_id: track.id,
+                ...getTrackMeta(track),
                 position_ms: Math.round(ev.currentTime * 1000),
                 duration_ms: Math.round(ev.duration * 1000),
                 source: activeContextRef.current?.source,
@@ -96,6 +111,7 @@ export function usePlayback() {
               sendTelemetry({
                 event_type: 'play_30s',
                 track_id: track.id,
+                ...getTrackMeta(track),
                 position_ms: Math.round(ev.currentTime * 1000),
                 duration_ms: Math.round(ev.duration * 1000),
                 source: activeContextRef.current?.source,
@@ -111,6 +127,7 @@ export function usePlayback() {
               sendTelemetry({
                 event_type: 'play_50pct',
                 track_id: track.id,
+                ...getTrackMeta(track),
                 position_ms: Math.round(ev.currentTime * 1000),
                 duration_ms: Math.round(ev.duration * 1000),
                 completion_ratio: ev.currentTime / ev.duration,
@@ -134,6 +151,7 @@ export function usePlayback() {
             sendTelemetry({
               event_type: 'completed',
               track_id: endedTrack.id,
+              ...getTrackMeta(endedTrack),
               position_ms: Math.round(playheadRef.current * 1000),
               duration_ms: Math.round(durationRef.current * 1000),
               completion_ratio: 1.0,
@@ -148,22 +166,36 @@ export function usePlayback() {
           setMuted(ev.muted);
           break;
         case 'error':
-          // If error occurs mid-stream, attempt bounded recovery
-          const cur = usePlayerStore.getState().currentTrack;
-          if (cur && (retryCountRef.current[cur.id] || 0) < 1) {
-            retryCountRef.current[cur.id] = 1;
+          // Stale stream errors from an old track must NEVER reload a newer current track
+          const curGen = playbackGenRef.current;
+          const expectedTrack = activeTrackRef.current;
+          const storeTrack = usePlayerStore.getState().currentTrack;
+
+          // Guard: Only handle error if active track matches the store current track
+          if (!expectedTrack || !storeTrack || expectedTrack.id !== storeTrack.id) {
+            return;
+          }
+
+          // Retry budget belongs to the playback attempt/generation (max 1 retry per attempt)
+          if (retryCountRef.current < 1) {
+            retryCountRef.current += 1;
             const resumePos = audioManager.currentTime;
             setStatus('loading');
-            resolveMedia(cur.id)
+            resolveMedia(storeTrack.id)
               .then(async (media) => {
+                if (playbackGenRef.current !== curGen || usePlayerStore.getState().currentTrack?.id !== storeTrack.id) {
+                  return;
+                }
                 if (!media?.streams?.length) throw new Error('No streams');
                 const best = [...media.streams].sort((a, b) => (b.bitrate_kbps ?? 0) - (a.bitrate_kbps ?? 0))[0];
                 if (!best?.url) throw new Error('No stream URL');
                 await audioManager.load(best.url);
+                if (playbackGenRef.current !== curGen) return;
                 if (resumePos > 0) audioManager.seek(resumePos);
                 await audioManager.play();
               })
               .catch(() => {
+                if (playbackGenRef.current !== curGen) return;
                 setError(ev.message || 'Stream connection lost');
               });
           } else {
@@ -257,6 +289,7 @@ export function usePlayback() {
         sendTelemetry({
           event_type: 'skip_lt_10s',
           track_id: prevTrack.id,
+          ...getTrackMeta(prevTrack),
           position_ms: Math.round(pos * 1000),
           duration_ms: Math.round(durationRef.current * 1000),
           source: activeContextRef.current?.source,
@@ -266,6 +299,7 @@ export function usePlayback() {
         sendTelemetry({
           event_type: 'skip_10_30s',
           track_id: prevTrack.id,
+          ...getTrackMeta(prevTrack),
           position_ms: Math.round(pos * 1000),
           duration_ms: Math.round(durationRef.current * 1000),
           source: activeContextRef.current?.source,
@@ -273,6 +307,9 @@ export function usePlayback() {
         });
       }
     }
+
+    const generation = ++playbackGenRef.current;
+    retryCountRef.current = 0;
 
     // Reset milestone state for new track
     activeTrackRef.current = currentTrack;
@@ -293,9 +330,11 @@ export function usePlayback() {
     }
 
     const attemptLoad = (isRetry = false) => {
+      if (ac.signal.aborted || playbackGenRef.current !== generation) return;
+
       resolveMedia(currentTrack.id, ac.signal)
         .then(async (media) => {
-          if (ac.signal.aborted) return;
+          if (ac.signal.aborted || playbackGenRef.current !== generation) return;
           if (!media?.streams?.length) {
             setError("Couldn't start playback. No audio streams found for this track.");
             prevIdRef.current = null;
@@ -309,8 +348,10 @@ export function usePlayback() {
           }
           try {
             await audioManager.load(best.url);
+            if (ac.signal.aborted || playbackGenRef.current !== generation) return;
             await audioManager.play();
           } catch (err: unknown) {
+            if (ac.signal.aborted || playbackGenRef.current !== generation) return;
             const e = err as Error;
             if (e.name === 'NotAllowedError') {
               setStatus('paused');
@@ -320,9 +361,9 @@ export function usePlayback() {
           }
         })
         .catch((err) => {
-          if (ac.signal.aborted || err?.name === 'AbortError') return;
-          if (!isRetry && (retryCountRef.current[currentTrack.id] || 0) < 1) {
-            retryCountRef.current[currentTrack.id] = 1;
+          if (ac.signal.aborted || err?.name === 'AbortError' || playbackGenRef.current !== generation) return;
+          if (!isRetry && retryCountRef.current < 1) {
+            retryCountRef.current = 1;
             attemptLoad(true);
             return;
           }

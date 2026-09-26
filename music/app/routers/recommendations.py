@@ -119,11 +119,12 @@ class EventIn(BaseModel):
     session_id: Optional[str] = None
     title: Optional[str] = None
     artist: Optional[str] = None
+    artist_id: Optional[str] = None
     album: Optional[str] = None
-    genre: Optional[str] = "pop"
-    mood: Optional[str] = "chill"
+    genre: Optional[str] = None
+    mood: Optional[str] = None
     position_ms: Optional[int] = 0
-    duration_ms: Optional[int] = 180000
+    duration_ms: Optional[int] = None
     completion_ratio: Optional[float] = None
     thumbnail: Optional[str] = None
     source: Optional[str] = None
@@ -165,13 +166,19 @@ EVENT_MAP = {
     tags=["recommendations"],
 )
 @router.post(
+    "/recommendations/telemetry",
+    summary="Alias for /recommendations/events",
+    include_in_schema=False,
+    tags=["recommendations"],
+)
+@router.post(
     "/events",
     summary="Compatibility alias for /recommendations/events",
     deprecated=True,
     include_in_schema=False,
     tags=["recommendations"],
 )
-def post_event(e: EventIn):
+def post_event(e: EventIn, request: Request = None):
     """Log user playback telemetry and update taste profile in real-time.
     
     Canonical write endpoint: POST /api/v1/recommendations/events
@@ -185,24 +192,26 @@ def post_event(e: EventIn):
     if e.thumbnail and sid:
         _artwork_cache[sid] = e.thumbnail
 
-    # Auto-register track in taste engine catalog if not already present
+    # Check track in taste engine catalog (ZERO fake metadata injection)
     track = None
     if sid:
         track = eng.store.get_track(sid)
-        if not track:
-            track = Track(
-                id=sid,
-                title=e.title or f"Track {sid}",
-                artist_id=e.artist.lower().replace(" ", "_") if e.artist else "artist_unknown",
-                artist_name=e.artist or "Unknown Artist",
-                album_name=e.album or "Single",
-                genres=[e.genre] if e.genre else ["pop"],
-                moods=[e.mood] if e.mood else ["chill"],
-                energy=0.6,
-                bpm=110.0,
-                popularity=0.85,
-            )
-            eng.seed_catalog([track])
+        if not track and request and hasattr(request.app, "state") and getattr(request.app.state, "provider", None):
+            provider = request.app.state.provider
+            try:
+                loop = asyncio.get_running_loop()
+                async def _hydrate():
+                    try:
+                        real_song = await provider.get_song(sid)
+                        if real_song:
+                            real_track = song_to_engine_track(real_song)
+                            if real_track and real_track.id:
+                                eng.seed_catalog([real_track])
+                    except Exception as ex:
+                        logger.debug("Telemetry background track hydration skipped for %s: %s", sid, ex)
+                loop.create_task(_hydrate())
+            except RuntimeError:
+                pass
 
     comp_ratio = e.completion_ratio
     if comp_ratio is None and e.duration_ms and e.duration_ms > 0 and e.position_ms is not None:
@@ -224,8 +233,13 @@ def post_event(e: EventIn):
     if qry:
         meta["query"] = qry
 
-    artist_id = track.artist_id if track else (e.artist.lower().replace(" ", "_") if e.artist else None)
+    artist_id = (
+        track.artist_id
+        if track
+        else (e.artist_id or (e.artist.lower().replace(" ", "_") if e.artist else None))
+    )
     album_id = track.album_id if track else None
+
 
     user_event = UserEvent(
         event_id=f"evt_{uuid.uuid4().hex[:12]}",

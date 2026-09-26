@@ -53,7 +53,55 @@ export default function HomePage() {
     );
   }
 
-  const primaryShelf = shelves[0];
+  // Defensive frontend sanitization: reject any shelf or item with synthetic placeholders, missing artwork, or duplicate songs
+  const DERIVATIVE_REGEX = /\b(workout|bpm|sped\s*up|speed\s*up|super\s*speed\s*up|slowed|reverb|nightcore|8d(?:\s*audio)?|16d(?:\s*audio)?|karaoke|instrumental|cover|tribute|unplugged(?:\s*remix)?|drum\s*version|piano\s*version|mashup|lo-?fi)\b/i;
+
+  const sanitizedShelves = shelves
+    .map((s) => {
+      const seenKeys = new Set<string>();
+      const seenTitles = new Set<string>();
+      const validItems = (s.items || []).filter((t) => {
+        if (
+          !t.artwork_url ||
+          t.artwork_url.trim() === '' ||
+          !t.title ||
+          t.title.toLowerCase().startsWith('track ') ||
+          t.title.toLowerCase().startsWith('sample track') ||
+          t.artist_name?.toLowerCase() === 'unknown artist' ||
+          t.subtitle?.toLowerCase() === 'unknown artist'
+        ) {
+          return false;
+        }
+
+        // Reject derivative alterations
+        if (DERIVATIVE_REGEX.test(t.title) || (t.artist_name && DERIVATIVE_REGEX.test(t.artist_name))) {
+          return false;
+        }
+
+        // Normalize title + artist for frontend deduplication
+        const cleanTitle = t.title.toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').replace(/[^\w\s]/g, '').trim();
+        const rawArtist = t.artist_name || t.subtitle || '';
+        const cleanArtist = rawArtist.toLowerCase().split(/[,·•|&]/)[0].replace(/[^\w\s]/g, '').trim();
+        const key = `${cleanTitle}::${cleanArtist}`;
+        if (cleanTitle && (seenKeys.has(key) || seenTitles.has(cleanTitle))) {
+          return false;
+        }
+        if (cleanTitle) {
+          seenKeys.add(key);
+          seenTitles.add(cleanTitle);
+        }
+        return true;
+      });
+      return { ...s, items: validItems };
+    })
+    .filter(
+      (s) =>
+        s.items.length > 0 &&
+        !s.title.toLowerCase().includes('unknown artist') &&
+        !s.title.toLowerCase().includes('your artists')
+    );
+
+  const primaryShelf = sanitizedShelves[0];
   const primarySongs = primaryShelf?.items ?? [];
   const featured = primarySongs[0] ?? null;
 
@@ -156,7 +204,7 @@ export default function HomePage() {
 
       {/* Subsequent Shelves: Because You Listened, Artist Radar, Rediscover, Discover Mix */}
       {!loading &&
-        shelves.slice(1).map((shelf) => {
+        sanitizedShelves.slice(1).map((shelf) => {
           if (!shelf.items || shelf.items.length === 0) return null;
           return (
             <section key={shelf.id} className="space-y-4">
