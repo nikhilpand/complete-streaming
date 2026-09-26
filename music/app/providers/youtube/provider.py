@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.core.errors import ProviderError, ProviderNotFound
@@ -446,6 +446,11 @@ class YouTubeProvider(MusicProvider):
                 "no_warnings": True,
                 "skip_download": True,
                 "noplaylist": True,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android", "ios", "mweb", "web"]
+                    }
+                },
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
@@ -453,13 +458,32 @@ class YouTubeProvider(MusicProvider):
 
         try:
             info = await asyncio.to_thread(_extract)
+            if not info:
+                return None
+
             stream_url = info.get("url")
+            # If primary url is missing, check formats list
+            if not stream_url and info.get("formats"):
+                audio_formats = [
+                    f for f in info["formats"]
+                    if f.get("url") and (f.get("acodec") != "none" or f.get("vcodec") == "none")
+                ]
+                if audio_formats:
+                    # Pick highest bitrate audio format
+                    audio_formats.sort(key=lambda x: int(x.get("abr") or x.get("tbr") or 0), reverse=True)
+                    stream_url = audio_formats[0].get("url")
+                    if not info.get("ext") and audio_formats[0].get("ext"):
+                        info["ext"] = audio_formats[0]["ext"]
+                    if not info.get("abr") and audio_formats[0].get("abr"):
+                        info["abr"] = audio_formats[0]["abr"]
+
             if not stream_url:
                 return None
 
             bitrate = int(info.get("abr") or info.get("tbr") or 160)
             mime = "audio/mp4" if info.get("ext") == "m4a" else "audio/webm"
 
+            now = datetime.now(timezone.utc)
             media = MediaInfo(
                 song_id=f"youtube:{vid}",
                 provider="youtube",
@@ -471,8 +495,8 @@ class YouTubeProvider(MusicProvider):
                         bitrate_kbps=bitrate,
                     )
                 ],
-                resolved_at=datetime.utcnow(),
-                expires_hint=datetime.utcnow() + timedelta(hours=4),
+                resolved_at=now,
+                expires_hint=now + timedelta(hours=4),
             )
 
             if self._cache:

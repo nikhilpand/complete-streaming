@@ -44,6 +44,18 @@ function getProxyHeaders(req: NextRequest): Record<string, string> {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
+
+  // Gracefully handle GET probes/prefetches on telemetry event ingestion
+  if (
+    (path.length === 2 && path[0] === 'recommendations' && path[1] === 'events') ||
+    (path.length === 1 && path[0] === 'events')
+  ) {
+    return NextResponse.json(
+      { ok: true, status: 'active', message: 'Telemetry endpoint. Send POST to submit events.' },
+      { status: 200 }
+    );
+  }
+
   const url = buildBackendUrl(path, req.nextUrl.searchParams);
 
   try {

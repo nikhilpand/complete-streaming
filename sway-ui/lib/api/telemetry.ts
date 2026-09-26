@@ -123,7 +123,6 @@ export function sendTelemetry(event: TelemetryEvent): void {
         ...getIdentityHeaders(),
       },
       body: JSON.stringify(payload),
-      keepalive: true,
     }).catch(() => {
       // Non-blocking telemetry
     });

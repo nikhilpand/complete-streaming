@@ -177,6 +177,22 @@ EVENT_MAP = {
 }
 
 
+@router.get(
+    "/recommendations/events",
+    summary="Probe for telemetry events endpoint",
+    tags=["recommendations"],
+)
+@router.get(
+    "/events",
+    summary="Compatibility probe for events endpoint",
+    include_in_schema=False,
+    tags=["recommendations"],
+)
+def get_events_probe():
+    """Allow GET probes/prefetches on events endpoint without 405 Method Not Allowed."""
+    return {"ok": True, "detail": "Telemetry ingestion endpoint. Send POST to log events."}
+
+
 @router.post(
     "/recommendations/events",
     summary="Ingest user playback telemetry event into taste engine (canonical)",

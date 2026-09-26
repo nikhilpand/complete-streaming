@@ -19,7 +19,8 @@ import { useLyricsSettings, getLyricsCSSVars } from '@/store/useLyricsSettings';
 import { LyricsSettingsPopover } from './LyricsSettingsPopover';
 import { DesktopLyricsProgressBar } from './lyrics/DesktopLyricsProgressBar';
 import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
-import { usePlaybackTelemetry, type RecommendationTrack } from '@/hooks/usePlaybackTelemetry';
+import { sendTelemetry } from '@/lib/api/telemetry';
+import type { RecommendationTrack } from '@/lib/api/types';
 import { Artwork } from '@/components/artwork/Artwork';
 import { artistNames } from '@/lib/utils';
 import type { LyricsTimingProvenance, LyricsSyncType } from '@/lib/lyrics-engine/types';
@@ -134,9 +135,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const queueIndex = usePlayerStore((s) => s.queueIndex);
   const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
 
-  // Lyrics settings & telemetry hooks
+  // Lyrics settings
   const lyricsSettings = useLyricsSettings();
-  const telemetry = usePlaybackTelemetry();
 
   // Local UI states
   const [isLiked, setIsLiked] = useState(false);
@@ -173,9 +173,13 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     try {
       localStorage.setItem(`sway_liked_${trackId}`, next ? 'true' : 'false');
     } catch {}
-    if (next) telemetry.logLike();
-    else telemetry.logUnlike();
-  }, [currentTrack?.id, (currentTrack as any)?.videoId, isLiked, telemetry]);
+    sendTelemetry({
+      event_type: next ? 'like' : 'dislike',
+      track_id: trackId,
+      title: currentTrack?.title,
+      artist: currentTrack ? artistNames(currentTrack.artists, currentTrack.subtitle) : undefined,
+    });
+  }, [currentTrack, isLiked]);
 
   // Fetch recommendations for Up Next drawer
   useEffect(() => {

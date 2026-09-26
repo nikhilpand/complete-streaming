@@ -13,9 +13,19 @@ interface Props {
 
 export function Artwork({ src, alt, size = 48, className }: Props) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const [useFallback, setUseFallback] = useState(false);
+  const [lastSrc, setLastSrc] = useState(src);
 
-  const url = src ? artUrl(src) : '';
-  const isFailed = Boolean(url && failedUrl === url);
+  // Reset fallback state when src changes
+  if (src !== lastSrc) {
+    setLastSrc(src);
+    setUseFallback(false);
+    setFailedUrl(null);
+  }
+
+  const upgradedUrl = src ? artUrl(src) : '';
+  const activeUrl = useFallback && src ? src : upgradedUrl;
+  const isFailed = Boolean(!activeUrl || !activeUrl.trim() || failedUrl === activeUrl);
 
   const hasExplicitWidth = className?.includes('w-');
   const hasExplicitHeight = className?.includes('h-');
@@ -24,7 +34,7 @@ export function Artwork({ src, alt, size = 48, className }: Props) {
     height: hasExplicitHeight ? undefined : size,
   };
 
-  if (!url || !url.trim() || isFailed) {
+  if (isFailed) {
     const iconSize = Math.max(14, Math.min(Math.round(size * 0.35), 48));
     return (
       <div
@@ -40,11 +50,17 @@ export function Artwork({ src, alt, size = 48, className }: Props) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={url}
+      src={activeUrl}
       alt={alt}
       width={size}
       height={size}
-      onError={() => setFailedUrl(url)}
+      onError={() => {
+        if (!useFallback && src && src !== upgradedUrl) {
+          setUseFallback(true);
+        } else {
+          setFailedUrl(activeUrl);
+        }
+      }}
       className={cn('object-cover flex-shrink-0', className)}
       style={dimensionStyle}
     />
