@@ -10,12 +10,18 @@ import {
   ChevronDown, Play, Pause, SkipBack, SkipForward,
   Shuffle, Repeat, Repeat1, Loader2, X, Music2, RotateCcw,
   Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles, Share2,
+  MessageSquareQuote,
 } from 'lucide-react';
 import { parseLRC, findActiveIndex, type ParsedLyricLine } from '@/lib/lyric-parser';
 import { getProxiedImageUrl, fetchLyrics } from '@/lib/api';
 import { isDevanagari, devanagariToRoman } from '@/lib/transliteration';
 import Link from 'next/link';
-import { useLyricsSettings, getLyricsCSSVars } from '@/store/useLyricsSettings';
+import {
+  useLyricsSettings,
+  getLyricsCSSVars,
+  type LyricsLayoutMode,
+  type LyricsBackgroundStyle,
+} from '@/store/useLyricsSettings';
 import { LyricsSettingsPopover } from './LyricsSettingsPopover';
 import { DesktopLyricsProgressBar } from './lyrics/DesktopLyricsProgressBar';
 import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
@@ -807,39 +813,91 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       {/* Ambient aurora layer — CSS-driven, no JS */}
       <div className="blyrics-aurora" aria-hidden="true" />
 
-      {/* ── Desktop Top Header Actions ── */}
-      <div className="hidden lg:flex absolute top-5 right-5 z-[2000] items-center gap-2.5">
-        <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
+      {/* ── Desktop Top Header Mode Switcher & Actions ── */}
+      <div className="hidden lg:flex absolute top-5 left-8 right-8 z-[2000] items-center justify-between pointer-events-none">
+        {/* Left: Interactive Mode Switcher Pill */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Layout Mode Pill */}
+          <div className="flex items-center p-1 rounded-full bg-black/40 backdrop-blur-2xl border border-white/15 shadow-xl text-[11px] font-medium">
+            {[
+              { id: 'split' as LyricsLayoutMode, label: 'Split' },
+              { id: 'focus' as LyricsLayoutMode, label: 'Sing' },
+              { id: 'column' as LyricsLayoutMode, label: 'Stream' },
+              { id: 'canvas' as LyricsLayoutMode, label: 'Canvas' },
+            ].map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => lyricsSettings.setLayoutMode(m.id)}
+                className={`px-3 py-1 rounded-full transition-all cursor-pointer ${
+                  lyricsSettings.layoutMode === m.id
+                    ? 'bg-white/25 text-white font-semibold shadow-sm'
+                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
 
-        <button
-          type="button"
-          onClick={() => setIsShareModalOpen(true)}
-          aria-label="Share lyrics card"
-          className="blyrics-action-btn"
-          title="Share Quote Card"
-        >
-          <Share2 size={17} />
-        </button>
+          {/* Atmosphere Mode Pill */}
+          <div className="flex items-center p-1 rounded-full bg-black/40 backdrop-blur-2xl border border-white/15 shadow-xl text-[11px] font-medium">
+            {[
+              { id: 'mesh' as LyricsBackgroundStyle, label: 'Aurora' },
+              { id: 'wash' as LyricsBackgroundStyle, label: 'Wash' },
+              { id: 'slate' as LyricsBackgroundStyle, label: 'Slate' },
+              { id: 'oled' as LyricsBackgroundStyle, label: 'OLED' },
+            ].map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => lyricsSettings.setBackgroundStyle(a.id)}
+                className={`px-3 py-1 rounded-full transition-all cursor-pointer ${
+                  lyricsSettings.backgroundStyle === a.id
+                    ? 'bg-white/25 text-white font-semibold shadow-sm'
+                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-        <button
-          type="button"
-          onClick={() => setIsDrawerOpen((prev) => !prev)}
-          aria-label="Up next queue"
-          className={`blyrics-action-btn ${isDrawerOpen ? 'active' : ''}`}
-          title="Up Next & Recommendations"
-        >
-          <ListMusic size={18} />
-        </button>
+        {/* Right: Actions */}
+        <div className="flex items-center gap-2.5 pointer-events-auto">
+          <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
 
-        <button
-          type="button"
-          onClick={handleClose}
-          aria-label="Close lyrics"
-          className="blyrics-action-btn"
-          title="Close (Esc)"
-        >
-          <X size={19} />
-        </button>
+          <button
+            type="button"
+            onClick={() => setIsShareModalOpen(true)}
+            aria-label="Share lyrics card"
+            className="blyrics-action-btn"
+            title="Share Quote Card"
+          >
+            <Share2 size={17} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsDrawerOpen((prev) => !prev)}
+            aria-label="Up next queue"
+            className={`blyrics-action-btn ${isDrawerOpen ? 'active' : ''}`}
+            title="Up Next & Recommendations"
+          >
+            <ListMusic size={18} />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleClose}
+            aria-label="Close lyrics"
+            className="blyrics-action-btn"
+            title="Close (Esc)"
+          >
+            <X size={19} />
+          </button>
+        </div>
       </div>
 
       {/* Side Panel: Album Art, Metadata & Controls */}
@@ -903,6 +961,16 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
                 {idx < artistList.length - 1 && <span className="text-white/40">,</span>}
               </React.Fragment>
             ))}
+          </div>
+
+          {/* Audio Quality Badges (Apple Music Style) */}
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-white/90 border border-white/12 backdrop-blur-md">
+              Dolby Atmos
+            </span>
+            <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-white/90 border border-white/12 backdrop-blur-md">
+              Lossless
+            </span>
           </div>
 
           {/* Provider Badge & Script Toggle */}
@@ -1096,6 +1164,17 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Iconic Apple Music Lyric Quote Bubble Button */}
+        <button
+          type="button"
+          onClick={() => setIsShareModalOpen(true)}
+          aria-label="Create lyrics quote card"
+          className="hidden lg:flex blyrics-quote-bubble-btn"
+          title="Create Lyric Quote Card"
+        >
+          <MessageSquareQuote size={20} />
+        </button>
       </div>
 
       {/* ── Mobile Bottom Controls & Mini Seek (Placed OUTSIDE masked panel) ── */}

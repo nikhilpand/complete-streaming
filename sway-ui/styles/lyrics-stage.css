@@ -75,7 +75,7 @@
 	inset: 0;
 	z-index: 1000;
 	display: grid;
-	grid-template-columns: minmax(280px, 33%) 1fr;
+	grid-template-columns: minmax(320px, 40%) 1fr;
 	height: 100vh;
 	height: 100dvh;
 	width: 100vw;
@@ -130,35 +130,48 @@
 	pointer-events: none;
 }
 
-/* ── Ambient Aurora Pulse ──
+/* ── Ambient Aurora Pulse & Multi-Hue Liquid Mesh ──
    Driven by a slow CSS keyframe so the background feels alive
-   without any JS. Syncs with the album color via CSS vars.
+   without any JS. Emulates Apple Music's fluid multi-stop mesh.
 */
 .better-lyrics-page .blyrics-aurora {
 	position: absolute;
-	inset: 0;
+	inset: -15%;
+	width: 130%;
+	height: 130%;
 	z-index: 2;
 	pointer-events: none;
-	opacity: 0.07;
+	opacity: 0.14;
 	background:
 		radial-gradient(
-			ellipse 60% 40% at 20% 80%,
-			hsl(var(--art-h, 215) var(--art-s, 40%) 55%) 0%,
+			circle 650px at 22% 28%,
+			hsl(var(--art-h, 215) var(--art-s, 75%) 52% / 0.75) 0%,
+			transparent 72%
+		),
+		radial-gradient(
+			circle 600px at 78% 24%,
+			hsl(calc(var(--art-h, 215) + 48) var(--art-s, 70%) 56% / 0.70) 0%,
 			transparent 70%
 		),
 		radial-gradient(
-			ellipse 50% 35% at 80% 20%,
-			hsl(calc(var(--art-h, 215) + 30) var(--art-s, 40%) 60%) 0%,
-			transparent 65%
+			circle 720px at 28% 76%,
+			hsl(calc(var(--art-h, 215) - 42) var(--art-s, 80%) 54% / 0.65) 0%,
+			transparent 72%
+		),
+		radial-gradient(
+			circle 580px at 82% 78%,
+			hsl(calc(var(--art-h, 215) + 95) var(--art-s, 65%) 58% / 0.60) 0%,
+			transparent 70%
 		);
-	animation: auroraBreath 14s var(--spring-in-out) infinite alternate;
-	will-change: opacity;
+	filter: blur(85px);
+	animation: auroraDrift 16s ease-in-out infinite alternate;
+	will-change: transform, opacity;
 }
 
-@keyframes auroraBreath {
-	0%   { opacity: 0.05; transform: scale(1); }
-	50%  { opacity: 0.11; transform: scale(1.03); }
-	100% { opacity: 0.06; transform: scale(0.98); }
+@keyframes auroraDrift {
+	0%   { opacity: 0.12; transform: translate(0, 0) scale(1) rotate(0deg); }
+	50%  { opacity: 0.22; transform: translate(-3%, 2%) scale(1.05) rotate(2deg); }
+	100% { opacity: 0.14; transform: translate(3%, -2%) scale(0.98) rotate(-1deg); }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -925,18 +938,55 @@
 	display: none !important;
 }
 
-/* Mesh Aurora Fluid Atmosphere */
-.better-lyrics-page.blyrics-bg-mesh::before {
-	filter: blur(120px) saturate(240%) brightness(0.42) !important;
-	transform: scale(1.15) !important;
+/* Smoked Slate Charcoal Atmosphere (Apple Music Juice WRLD style) */
+.better-lyrics-page.blyrics-bg-slate {
+	background: #10131a !important;
 }
-.better-lyrics-page.blyrics-bg-mesh .blyrics-aurora {
-	opacity: 0.22 !important;
-	animation: auroraBreath 7s ease-in-out infinite alternate !important;
+.better-lyrics-page.blyrics-bg-slate::before {
+	filter: blur(100px) saturate(75%) brightness(0.24) !important;
+	opacity: 0.38 !important;
+}
+.better-lyrics-page.blyrics-bg-slate::after {
+	background: radial-gradient(ellipse 95% 75% at 42% 35%, rgba(22, 27, 36, 0.45) 0%, rgba(8, 10, 14, 0.94) 100%) !important;
+}
+.better-lyrics-page.blyrics-bg-slate .blyrics-aurora {
+	opacity: 0.05 !important;
 }
 
-/* Layout: Focus Mode (Cinema 3-Line Stage) */
+/* Mesh Aurora Fluid Atmosphere (Apple Music Nao & Taylor Swift style) */
+.better-lyrics-page.blyrics-bg-mesh::before {
+	filter: blur(110px) saturate(220%) brightness(0.38) !important;
+	transform: scale(1.14) !important;
+	opacity: 0.92 !important;
+}
+.better-lyrics-page.blyrics-bg-mesh .blyrics-aurora {
+	opacity: 0.30 !important;
+	filter: blur(75px) !important;
+	animation: auroraDrift 12s ease-in-out infinite alternate !important;
+}
+
 @media screen and (min-width: 1025px) {
+	/* Layout: Split (Apple Music 2-Column Split) */
+	.better-lyrics-page.blyrics-layout-split {
+		grid-template-columns: minmax(340px, 42%) 1fr;
+	}
+	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel {
+		padding: clamp(2rem, 3.8vw, 4.5rem) clamp(2rem, 4vw, 5.5rem);
+		align-items: flex-start;
+	}
+	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel .album-art {
+		max-width: min(380px, 38vh);
+		max-height: 38vh;
+		border-radius: 20px;
+	}
+	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel .track-info,
+	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel .blyrics-controls-pill,
+	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel .blyrics-progress-track {
+		max-width: 380px;
+		width: 100%;
+	}
+
+	/* Layout: Focus Mode (Cinema 3-Line Stage) */
 	.better-lyrics-page.blyrics-layout-focus {
 		grid-template-columns: 320px 1fr;
 	}
@@ -985,6 +1035,70 @@
 		margin: 0 auto;
 		width: 100%;
 	}
+
+	/* Layout: Cover Canvas Mode */
+	.better-lyrics-page.blyrics-layout-canvas {
+		grid-template-columns: minmax(400px, 48%) 1fr;
+	}
+	.better-lyrics-page.blyrics-layout-canvas .blyrics-side-panel {
+		align-items: center;
+		text-align: center;
+		padding: clamp(2rem, 3.5vw, 4rem);
+	}
+	.better-lyrics-page.blyrics-layout-canvas .blyrics-side-panel .album-art {
+		max-width: min(440px, 46vh);
+		max-height: 46vh;
+		border-radius: 24px;
+		box-shadow:
+			0 40px 100px -15px rgba(0, 0, 0, 0.8),
+			0 0 0 1px rgba(255, 255, 255, 0.12),
+			0 0 120px -10px hsl(var(--art-h, 215) var(--art-s, 40%) 55% / 0.35);
+	}
+	.better-lyrics-page.blyrics-layout-canvas .blyrics-side-panel .track-info {
+		align-items: center;
+		text-align: center;
+		max-width: 440px;
+	}
+	.better-lyrics-page.blyrics-layout-canvas .blyrics-side-panel .artist {
+		justify-content: center;
+	}
+	.better-lyrics-page.blyrics-layout-canvas .blyrics-side-panel .blyrics-controls-pill,
+	.better-lyrics-page.blyrics-layout-canvas .blyrics-side-panel .blyrics-progress-track {
+		max-width: 440px;
+	}
+}
+
+/* Iconic Apple Music Lyric Quote Bubble Button */
+.blyrics-quote-bubble-btn {
+	position: absolute;
+	bottom: 2rem;
+	right: 2.5rem;
+	z-index: 100;
+	width: 44px;
+	height: 44px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(255, 255, 255, 0.12);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	backdrop-filter: blur(20px) saturate(1.4);
+	-webkit-backdrop-filter: blur(20px) saturate(1.4);
+	color: rgba(255, 255, 255, 0.88);
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+	transition: all 0.24s var(--spring-out);
+	cursor: pointer;
+}
+
+.blyrics-quote-bubble-btn:hover {
+	transform: scale(1.08);
+	background: rgba(255, 255, 255, 0.22);
+	color: #ffffff;
+	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.blyrics-quote-bubble-btn:active {
+	transform: scale(0.94);
 }
 
 /* Instrumental Section Label & Pulse */

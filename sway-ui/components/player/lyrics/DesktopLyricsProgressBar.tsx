@@ -22,7 +22,7 @@ export const DesktopLyricsProgressBar = memo(({
   const bufferedProgress = duration > 0 ? (bufferedTime / duration) * 100 : 0;
 
   return (
-    <div className="hidden lg:block w-full max-w-[340px] space-y-1.5 pt-1">
+    <div className="hidden lg:block w-full space-y-1.5 pt-1">
       <div
         className="blyrics-progress-track group cursor-pointer"
         onClick={(e) => {

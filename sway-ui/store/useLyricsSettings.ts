@@ -7,8 +7,8 @@ export type LyricsFontFamily = 'noto' | 'mukta' | 'system';
 export type LyricsContrast = 'high' | 'medium' | 'subtle';
 export type LyricsBlur = 'off' | 'light' | 'strong';
 export type LyricsAlign = 'left' | 'center';
-export type LyricsLayoutMode = 'split' | 'focus' | 'column';
-export type LyricsBackgroundStyle = 'wash' | 'mesh' | 'oled';
+export type LyricsLayoutMode = 'split' | 'focus' | 'column' | 'canvas';
+export type LyricsBackgroundStyle = 'wash' | 'mesh' | 'slate' | 'oled';
 export type LyricsKaraokeEffect = 'smooth_sweep' | 'glow' | 'bounce';
 
 export interface LyricsSettingsState {
@@ -250,6 +250,10 @@ export function getLyricsCSSVars(settings: LyricsSettingsState) {
     bgBrightness = '0';
     bgOpacity = '0';
     blurVal = '0px';
+  } else if (settings.backgroundStyle === 'slate') {
+    bgBrightness = '0.14';
+    bgOpacity = '0.45';
+    blurVal = '0.6px';
   } else if (settings.backgroundStyle === 'mesh') {
     bgBrightness = '0.35';
     bgOpacity = '0.90';

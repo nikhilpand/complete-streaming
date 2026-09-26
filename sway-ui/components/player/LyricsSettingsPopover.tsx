@@ -168,17 +168,18 @@ export function LyricsSettingsPopover({
                 <Layout size={11} className="text-white/60" />
                 <span>Display Layout</span>
               </div>
-              <div className="grid grid-cols-3 gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+              <div className="grid grid-cols-4 gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
                 {[
-                  { id: 'split' as LyricsLayoutMode, label: 'Split (2-Col)' },
-                  { id: 'focus' as LyricsLayoutMode, label: 'Focus (Stage)' },
+                  { id: 'split' as LyricsLayoutMode, label: 'Split' },
+                  { id: 'focus' as LyricsLayoutMode, label: 'Sing' },
                   { id: 'column' as LyricsLayoutMode, label: 'Stream' },
+                  { id: 'canvas' as LyricsLayoutMode, label: 'Canvas' },
                 ].map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => setLayoutMode(item.id)}
-                    className={`py-1.5 px-1.5 rounded-lg text-[11px] font-medium truncate transition-all cursor-pointer ${
+                    className={`py-1.5 px-1 rounded-lg text-[11px] font-medium text-center truncate transition-all cursor-pointer ${
                       layoutMode === item.id
                         ? 'bg-white/25 text-white shadow-sm font-semibold'
                         : 'text-white/60 hover:text-white hover:bg-white/10'
@@ -196,17 +197,18 @@ export function LyricsSettingsPopover({
                 <Palette size={11} className="text-white/60" />
                 <span>Atmosphere</span>
               </div>
-              <div className="grid grid-cols-3 gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+              <div className="grid grid-cols-4 gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
                 {[
-                  { id: 'wash' as LyricsBackgroundStyle, label: 'Art Wash' },
-                  { id: 'mesh' as LyricsBackgroundStyle, label: 'Fluid Mesh' },
-                  { id: 'oled' as LyricsBackgroundStyle, label: 'OLED Pure' },
+                  { id: 'mesh' as LyricsBackgroundStyle, label: 'Aurora' },
+                  { id: 'wash' as LyricsBackgroundStyle, label: 'Wash' },
+                  { id: 'slate' as LyricsBackgroundStyle, label: 'Slate' },
+                  { id: 'oled' as LyricsBackgroundStyle, label: 'OLED' },
                 ].map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => setBackgroundStyle(item.id)}
-                    className={`py-1.5 px-1.5 rounded-lg text-[11px] font-medium truncate transition-all cursor-pointer ${
+                    className={`py-1.5 px-1 rounded-lg text-[11px] font-medium text-center truncate transition-all cursor-pointer ${
                       backgroundStyle === item.id
                         ? 'bg-white/25 text-white shadow-sm font-semibold'
                         : 'text-white/60 hover:text-white hover:bg-white/10'
