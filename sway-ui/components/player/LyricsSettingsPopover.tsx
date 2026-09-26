@@ -10,8 +10,10 @@ import {
   LyricsContrast,
   LyricsBlur,
   LyricsAlign,
+  LyricsLayoutMode,
+  LyricsBackgroundStyle,
 } from '@/store/useLyricsSettings';
-import { Settings2, RotateCcw, ExternalLink, Check } from 'lucide-react';
+import { Settings2, RotateCcw, ExternalLink, Sparkles, Layout, Palette, Music } from 'lucide-react';
 import Link from 'next/link';
 
 interface LyricsSettingsPopoverProps {
@@ -35,6 +37,9 @@ export function LyricsSettingsPopover({
     blur,
     align,
     showAccentBar,
+    layoutMode,
+    backgroundStyle,
+    showInstrumentalCountdown,
     setFontSize,
     setLineHeight,
     setFontFamily,
@@ -42,8 +47,12 @@ export function LyricsSettingsPopover({
     setBlur,
     setAlign,
     setShowAccentBar,
+    setLayoutMode,
+    setBackgroundStyle,
+    setShowInstrumentalCountdown,
     setTrackSyncOffset,
     getTrackSyncOffset,
+    applyPreset,
     resetDefaults,
   } = useLyricsSettings();
 
@@ -125,6 +134,88 @@ export function LyricsSettingsPopover({
                 <RotateCcw size={11} />
                 <span>Reset</span>
               </button>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1 text-[11px] font-medium text-white/60 uppercase tracking-wider">
+                <Sparkles size={11} className="text-amber-400" />
+                <span>Experience Presets</span>
+              </div>
+              <div className="grid grid-cols-5 gap-1 bg-white/5 p-1 rounded-xl border border-white/10 text-center">
+                {[
+                  { id: 'cinematic', label: 'Cinema' },
+                  { id: 'party', label: 'Party' },
+                  { id: 'bold', label: 'Bold' },
+                  { id: 'minimal', label: 'Clean' },
+                  { id: 'dense', label: 'Dense' },
+                ].map((pr) => (
+                  <button
+                    key={pr.id}
+                    type="button"
+                    onClick={() => applyPreset(pr.id as any)}
+                    className="py-1 px-1 rounded-lg text-[10px] font-semibold text-white/70 hover:text-white hover:bg-white/15 transition-all cursor-pointer truncate"
+                  >
+                    {pr.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Layout Mode */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1 text-[11px] font-medium text-white/60 uppercase tracking-wider">
+                <Layout size={11} className="text-white/60" />
+                <span>Display Layout</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                {[
+                  { id: 'split' as LyricsLayoutMode, label: 'Split (2-Col)' },
+                  { id: 'focus' as LyricsLayoutMode, label: 'Focus (Stage)' },
+                  { id: 'column' as LyricsLayoutMode, label: 'Stream' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setLayoutMode(item.id)}
+                    className={`py-1.5 px-1.5 rounded-lg text-[11px] font-medium truncate transition-all cursor-pointer ${
+                      layoutMode === item.id
+                        ? 'bg-white/25 text-white shadow-sm font-semibold'
+                        : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Atmosphere Background */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1 text-[11px] font-medium text-white/60 uppercase tracking-wider">
+                <Palette size={11} className="text-white/60" />
+                <span>Atmosphere</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                {[
+                  { id: 'wash' as LyricsBackgroundStyle, label: 'Art Wash' },
+                  { id: 'mesh' as LyricsBackgroundStyle, label: 'Fluid Mesh' },
+                  { id: 'oled' as LyricsBackgroundStyle, label: 'OLED Pure' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setBackgroundStyle(item.id)}
+                    className={`py-1.5 px-1.5 rounded-lg text-[11px] font-medium truncate transition-all cursor-pointer ${
+                      backgroundStyle === item.id
+                        ? 'bg-white/25 text-white shadow-sm font-semibold'
+                        : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Font Size */}
@@ -273,6 +364,24 @@ export function LyricsSettingsPopover({
                   <span
                     className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
                       showAccentBar ? 'left-[18px]' : 'left-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-white/75">Instrumental Countdown</span>
+                <button
+                  type="button"
+                  onClick={() => setShowInstrumentalCountdown(!showInstrumentalCountdown)}
+                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                    showInstrumentalCountdown ? 'bg-white/40' : 'bg-white/10'
+                  }`}
+                  aria-pressed={showInstrumentalCountdown}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      showInstrumentalCountdown ? 'left-[18px]' : 'left-0.5'
                     }`}
                   />
                 </button>

@@ -9,7 +9,7 @@ import { audioManager } from '@/lib/audio/AudioManager';
 import {
   ChevronDown, Play, Pause, SkipBack, SkipForward,
   Shuffle, Repeat, Repeat1, Loader2, X, Music2, RotateCcw,
-  Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles,
+  Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles, Share2,
 } from 'lucide-react';
 import { parseLRC, findActiveIndex, type ParsedLyricLine } from '@/lib/lyric-parser';
 import { getProxiedImageUrl, fetchLyrics } from '@/lib/api';
@@ -19,6 +19,7 @@ import { useLyricsSettings, getLyricsCSSVars } from '@/store/useLyricsSettings';
 import { LyricsSettingsPopover } from './LyricsSettingsPopover';
 import { DesktopLyricsProgressBar } from './lyrics/DesktopLyricsProgressBar';
 import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
+import { LyricShareCardModal } from './lyrics/LyricShareCardModal';
 import { sendTelemetry } from '@/lib/api/telemetry';
 import type { RecommendationTrack } from '@/lib/api/types';
 import { Artwork } from '@/components/artwork/Artwork';
@@ -39,17 +40,25 @@ const LyricLine = memo(({
   line,
   index,
   showRomanized,
+  showInstrumentalCountdown,
 }: {
   line: ParsedLyricLine;
   index: number;
   showRomanized?: boolean;
+  showInstrumentalCountdown?: boolean;
 }) => {
   if (line.isInstrumental || (!line.text?.trim() && (!line.words || line.words.length === 0))) {
+    const durationSec = Math.max(2, Math.round((line.endTime || (line.time + 3)) - line.time));
     return (
       <div id={`line-${index}`} className="blyrics--line blyrics--instrumental" data-index={index} tabIndex={0}>
         <div className="blyrics--dots">
           {[0, 1, 2].map((d) => <div key={d} className="blyrics--dot" data-dot={d} />)}
         </div>
+        {showInstrumentalCountdown && (
+          <span className="blyrics--instrumental-label ml-3 text-[11px] font-mono tracking-wider text-white/70">
+            Solo / Instrumental · {durationSec}s
+          </span>
+        )}
       </div>
     );
   }
@@ -141,6 +150,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   // Local UI states
   const [isLiked, setIsLiked] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [recommendations, setRecommendations] = useState<RecommendationTrack[]>([]);
   const [recsLoading, setRecsLoading] = useState(false);
 
@@ -177,7 +187,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       event_type: next ? 'like' : 'dislike',
       track_id: trackId,
       title: currentTrack?.title,
-      artist: currentTrack ? artistNames(currentTrack.artists, currentTrack.subtitle) : undefined,
+      artist: currentTrack?.artist,
     });
   }, [currentTrack, isLiked]);
 
@@ -738,6 +748,20 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
               }
             });
           }
+
+          // Progressive instrumental dots activation
+          if (lineData?.isInstrumental) {
+            const cached = elemCache.current.get(idx);
+            const dots = cached?.dots || Array.from(container.querySelectorAll<HTMLElement>(`#line-${idx} .blyrics--dot`));
+            const start = lineData.time;
+            const end = lineData.endTime || (start + 3);
+            const dur = Math.max(0.5, end - start);
+            const progress = Math.max(0, Math.min(1, (highlightTime - start) / dur));
+            dots.forEach((dot, dIdx) => {
+              const threshold = (dIdx + 1) / (dots.length + 1);
+              dot.classList.toggle('active', progress >= threshold);
+            });
+          }
         }
       }
 
@@ -773,7 +797,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.982 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      className={`better-lyrics-page ${lyricsSettings.showAccentBar ? 'blyrics-accent-bar' : ''} ${lyricsSettings.align === 'center' ? 'blyrics-align-center' : ''}`}
+      className={`better-lyrics-page blyrics-layout-${lyricsSettings.layoutMode || 'split'} blyrics-bg-${lyricsSettings.backgroundStyle || 'wash'} ${lyricsSettings.showAccentBar ? 'blyrics-accent-bar' : ''} ${lyricsSettings.align === 'center' ? 'blyrics-align-center' : ''}`}
       style={{
         background: bgMain,
         '--blyrics-background-img': coverUrl ? `url(${coverUrl})` : 'none',
@@ -786,6 +810,16 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       {/* ── Desktop Top Header Actions ── */}
       <div className="hidden lg:flex absolute top-5 right-5 z-[2000] items-center gap-2.5">
         <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
+
+        <button
+          type="button"
+          onClick={() => setIsShareModalOpen(true)}
+          aria-label="Share lyrics card"
+          className="blyrics-action-btn"
+          title="Share Quote Card"
+        >
+          <Share2 size={17} />
+        </button>
 
         <button
           type="button"
@@ -897,6 +931,15 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         {/* Mobile Top Actions (inline inside top header) */}
         <div className="lg:hidden flex items-center gap-1 shrink-0">
           <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
+          <button
+            type="button"
+            onClick={() => setIsShareModalOpen(true)}
+            aria-label="Share lyrics card"
+            className="blyrics-action-btn"
+            title="Share Quote Card"
+          >
+            <Share2 size={16} />
+          </button>
           <button
             type="button"
             onClick={() => setIsDrawerOpen((prev) => !prev)}
@@ -1013,6 +1056,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
                   line={line}
                   index={lIdx}
                   showRomanized={lyricsSettings.showRomanized}
+                  showInstrumentalCountdown={lyricsSettings.showInstrumentalCountdown}
                 />
               ))
             ) : (
@@ -1199,6 +1243,15 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Share Lyrics Quote Card Modal ── */}
+      <LyricShareCardModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        track={currentTrack}
+        lyrics={activeLyrics}
+        initialActiveIndex={lastActiveIdx.current >= 0 ? lastActiveIdx.current : 0}
+      />
     </motion.div>
   );
 }

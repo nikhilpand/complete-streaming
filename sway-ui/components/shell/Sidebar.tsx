@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Search, Library, Settings, Disc } from 'lucide-react';
+import { Home, Search, Library, Settings, Disc, Mic2 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -14,6 +14,7 @@ const navItems = [
   { name: 'Home', href: '/', icon: Home },
   { name: 'Search', href: '/search', icon: Search },
   { name: 'Library', href: '/library', icon: Library },
+  { name: 'Lyrics', href: '/lyrics', icon: Mic2 },
 ];
 
 export function Sidebar() {

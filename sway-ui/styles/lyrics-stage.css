@@ -907,3 +907,103 @@
 	}
 }
 
+/* ════════════════════════════════════════════════════════════
+   ATMOSPHERE THEMES & LAYOUT MODES
+   ════════════════════════════════════════════════════════════ */
+
+/* OLED Pure Black Mode */
+.better-lyrics-page.blyrics-bg-oled {
+	background: #000000 !important;
+}
+.better-lyrics-page.blyrics-bg-oled::before {
+	display: none !important;
+}
+.better-lyrics-page.blyrics-bg-oled::after {
+	background: radial-gradient(ellipse 90% 70% at 50% 50%, rgba(0,0,0,0.5) 0%, #000000 100%) !important;
+}
+.better-lyrics-page.blyrics-bg-oled .blyrics-aurora {
+	display: none !important;
+}
+
+/* Mesh Aurora Fluid Atmosphere */
+.better-lyrics-page.blyrics-bg-mesh::before {
+	filter: blur(120px) saturate(240%) brightness(0.42) !important;
+	transform: scale(1.15) !important;
+}
+.better-lyrics-page.blyrics-bg-mesh .blyrics-aurora {
+	opacity: 0.22 !important;
+	animation: auroraBreath 7s ease-in-out infinite alternate !important;
+}
+
+/* Layout: Focus Mode (Cinema 3-Line Stage) */
+@media screen and (min-width: 1025px) {
+	.better-lyrics-page.blyrics-layout-focus {
+		grid-template-columns: 320px 1fr;
+	}
+	.better-lyrics-page.blyrics-layout-focus #blyrics-container {
+		text-align: center;
+		padding-top: 15vh;
+	}
+	.better-lyrics-page.blyrics-layout-focus .blyrics--line {
+		justify-content: center;
+		transform-origin: center center;
+	}
+	.better-lyrics-page.blyrics-layout-focus .blyrics--line.blyrics--active {
+		transform: scale(1.12);
+		text-shadow: 0 0 45px rgba(255, 255, 255, 0.45);
+	}
+	.better-lyrics-page.blyrics-layout-focus .blyrics--line:not(.blyrics--active) {
+		opacity: 0.12 !important;
+		filter: blur(2.5px) !important;
+	}
+
+	/* Layout: Single Column Stream */
+	.better-lyrics-page.blyrics-layout-column {
+		grid-template-columns: 1fr;
+		grid-template-rows: auto 1fr;
+	}
+	.better-lyrics-page.blyrics-layout-column .blyrics-side-panel {
+		flex-direction: row;
+		height: auto;
+		max-height: 90px;
+		padding: 1rem 2.5rem;
+		align-items: center;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+	}
+	.better-lyrics-page.blyrics-layout-column .blyrics-side-panel .album-art {
+		width: 52px;
+		height: 52px;
+		max-width: 52px;
+		max-height: 52px;
+	}
+	.better-lyrics-page.blyrics-layout-column .blyrics-side-panel .blyrics-controls-pill,
+	.better-lyrics-page.blyrics-layout-column .blyrics-side-panel .blyrics-progress-track {
+		display: none;
+	}
+	.better-lyrics-page.blyrics-layout-column #blyrics-wrapper {
+		max-width: 820px;
+		margin: 0 auto;
+		width: 100%;
+	}
+}
+
+/* Instrumental Section Label & Pulse */
+.blyrics--instrumental-label {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.25rem 0.75rem;
+	border-radius: 9999px;
+	background: rgba(255, 255, 255, 0.08);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	backdrop-filter: blur(8px);
+	letter-spacing: 0.05em;
+	transition: all 0.3s ease;
+}
+.blyrics--active .blyrics--instrumental-label {
+	background: rgba(255, 255, 255, 0.16);
+	border-color: rgba(255, 255, 255, 0.25);
+	color: #ffffff !important;
+	opacity: 1 !important;
+}
+
+

@@ -7,6 +7,9 @@ export type LyricsFontFamily = 'noto' | 'mukta' | 'system';
 export type LyricsContrast = 'high' | 'medium' | 'subtle';
 export type LyricsBlur = 'off' | 'light' | 'strong';
 export type LyricsAlign = 'left' | 'center';
+export type LyricsLayoutMode = 'split' | 'focus' | 'column';
+export type LyricsBackgroundStyle = 'wash' | 'mesh' | 'oled';
+export type LyricsKaraokeEffect = 'smooth_sweep' | 'glow' | 'bounce';
 
 export interface LyricsSettingsState {
   fontSize: LyricsFontSize;
@@ -17,6 +20,10 @@ export interface LyricsSettingsState {
   align: LyricsAlign;
   showAccentBar: boolean;
   showRomanized: boolean;
+  layoutMode: LyricsLayoutMode;
+  backgroundStyle: LyricsBackgroundStyle;
+  showInstrumentalCountdown: boolean;
+  karaokeEffect: LyricsKaraokeEffect;
   perTrackSyncOffset: Record<string, number>; // trackId -> offset in ms
 
   setFontSize: (fontSize: LyricsFontSize) => void;
@@ -27,9 +34,13 @@ export interface LyricsSettingsState {
   setAlign: (align: LyricsAlign) => void;
   setShowAccentBar: (showAccentBar: boolean) => void;
   setShowRomanized: (showRomanized: boolean) => void;
+  setLayoutMode: (mode: LyricsLayoutMode) => void;
+  setBackgroundStyle: (style: LyricsBackgroundStyle) => void;
+  setShowInstrumentalCountdown: (show: boolean) => void;
+  setKaraokeEffect: (effect: LyricsKaraokeEffect) => void;
   setTrackSyncOffset: (trackId: string, offsetMs: number) => void;
   getTrackSyncOffset: (trackId?: string) => number;
-  applyPreset: (preset: 'minimal' | 'cinematic' | 'bold' | 'dense') => void;
+  applyPreset: (preset: 'minimal' | 'cinematic' | 'bold' | 'dense' | 'party') => void;
   resetDefaults: () => void;
 }
 
@@ -42,6 +53,10 @@ const DEFAULT_SETTINGS = {
   align: 'left' as LyricsAlign,
   showAccentBar: true,
   showRomanized: false,
+  layoutMode: 'split' as LyricsLayoutMode,
+  backgroundStyle: 'wash' as LyricsBackgroundStyle,
+  showInstrumentalCountdown: true,
+  karaokeEffect: 'smooth_sweep' as LyricsKaraokeEffect,
   perTrackSyncOffset: {} as Record<string, number>,
 };
 
@@ -58,6 +73,10 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
       setAlign: (align) => set({ align }),
       setShowAccentBar: (showAccentBar) => set({ showAccentBar }),
       setShowRomanized: (showRomanized) => set({ showRomanized }),
+      setLayoutMode: (layoutMode) => set({ layoutMode }),
+      setBackgroundStyle: (backgroundStyle) => set({ backgroundStyle }),
+      setShowInstrumentalCountdown: (showInstrumentalCountdown) => set({ showInstrumentalCountdown }),
+      setKaraokeEffect: (karaokeEffect) => set({ karaokeEffect }),
 
       setTrackSyncOffset: (trackId, offsetMs) =>
         set((state) => ({
@@ -83,6 +102,10 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
               blur: 'off',
               align: 'left',
               showAccentBar: false,
+              layoutMode: 'column',
+              backgroundStyle: 'oled',
+              showInstrumentalCountdown: false,
+              karaokeEffect: 'smooth_sweep',
             });
             break;
           case 'cinematic':
@@ -94,6 +117,10 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
               blur: 'strong',
               align: 'left',
               showAccentBar: true,
+              layoutMode: 'split',
+              backgroundStyle: 'wash',
+              showInstrumentalCountdown: true,
+              karaokeEffect: 'smooth_sweep',
             });
             break;
           case 'bold':
@@ -105,6 +132,10 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
               blur: 'light',
               align: 'left',
               showAccentBar: true,
+              layoutMode: 'split',
+              backgroundStyle: 'mesh',
+              showInstrumentalCountdown: true,
+              karaokeEffect: 'glow',
             });
             break;
           case 'dense':
@@ -116,6 +147,25 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
               blur: 'off',
               align: 'left',
               showAccentBar: false,
+              layoutMode: 'column',
+              backgroundStyle: 'wash',
+              showInstrumentalCountdown: false,
+              karaokeEffect: 'smooth_sweep',
+            });
+            break;
+          case 'party':
+            set({
+              fontSize: 'xl',
+              lineHeight: 'relaxed',
+              fontFamily: 'mukta',
+              contrast: 'high',
+              blur: 'strong',
+              align: 'center',
+              showAccentBar: true,
+              layoutMode: 'focus',
+              backgroundStyle: 'mesh',
+              showInstrumentalCountdown: true,
+              karaokeEffect: 'bounce',
             });
             break;
         }
@@ -148,6 +198,10 @@ if (typeof window !== 'undefined') {
             align: state.align,
             showAccentBar: state.showAccentBar,
             showRomanized: state.showRomanized,
+            layoutMode: state.layoutMode,
+            backgroundStyle: state.backgroundStyle,
+            showInstrumentalCountdown: state.showInstrumentalCountdown,
+            karaokeEffect: state.karaokeEffect,
           },
         }),
       }).catch(() => {});
@@ -160,7 +214,7 @@ export function getLyricsCSSVars(settings: LyricsSettingsState) {
   let fontSizeVal = 'clamp(1.6rem, 2.6vw, 2.6rem)';
   if (settings.fontSize === 'sm') fontSizeVal = 'clamp(1.2rem, 1.8vw, 1.8rem)';
   else if (settings.fontSize === 'md') fontSizeVal = 'clamp(1.4rem, 2.2vw, 2.2rem)';
-  else if (settings.fontSize === 'xl') fontSizeVal = 'clamp(1.9rem, 3.2vw, 3.2rem)';
+  else if (settings.fontSize === 'xl') fontSizeVal = 'clamp(1.9rem, 3.4vw, 3.4rem)';
 
   // Line Height
   let lineHeightVal = '1.45';
@@ -189,6 +243,18 @@ export function getLyricsCSSVars(settings: LyricsSettingsState) {
   const justifyContent = textAlign === 'center' ? 'center' : 'flex-start';
   const transformOrigin = textAlign === 'center' ? 'center center' : 'left center';
 
+  // Background styling flags
+  let bgBrightness = '0.28';
+  let bgOpacity = '0.82';
+  if (settings.backgroundStyle === 'oled') {
+    bgBrightness = '0';
+    bgOpacity = '0';
+    blurVal = '0px';
+  } else if (settings.backgroundStyle === 'mesh') {
+    bgBrightness = '0.35';
+    bgOpacity = '0.90';
+  }
+
   return {
     '--lyrics-font-size': fontSizeVal,
     '--blyrics-font-size': fontSizeVal,
@@ -201,5 +267,10 @@ export function getLyricsCSSVars(settings: LyricsSettingsState) {
     '--lyrics-text-align': textAlign,
     '--lyrics-justify-content': justifyContent,
     '--lyrics-transform-origin': transformOrigin,
+    '--blyrics-background-brightness': bgBrightness,
+    '--blyrics-background-opacity': bgOpacity,
+    '--lyrics-layout-mode': settings.layoutMode,
+    '--lyrics-bg-style': settings.backgroundStyle,
+    '--lyrics-karaoke-effect': settings.karaokeEffect,
   } as React.CSSProperties;
 }
