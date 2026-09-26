@@ -10,9 +10,10 @@ interface Props {
   index?: number;
   context?: Song[];
   showAlbum?: boolean;
+  playbackContext?: { source?: string; query?: string };
 }
 
-export function SongRow({ song, index, context, showAlbum = true }: Props) {
+export function SongRow({ song, index, context, showAlbum = true, playbackContext }: Props) {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const status = usePlayerStore((s) => s.status);
   const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
@@ -31,7 +32,7 @@ export function SongRow({ song, index, context, showAlbum = true }: Props) {
       const idx = context.findIndex((s) => s.id === song.id);
       setQueue(context, idx >= 0 ? idx : 0);
     }
-    setCurrentTrack(song);
+    setCurrentTrack(song, playbackContext);
     usePlayerStore.setState({ isLyricsOpen: true });
   }
 

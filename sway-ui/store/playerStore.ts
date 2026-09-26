@@ -5,8 +5,14 @@ import { getSavedVolume, getSavedMuted } from '@/lib/utils';
 
 export type PlayerStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
+export interface PlaybackContext {
+  source?: string;
+  query?: string;
+}
+
 interface PlayerStore {
   currentTrack: Song | null;
+  playbackContext: PlaybackContext | null;
   queue: Song[];
   queueIndex: number;
   status: PlayerStatus;
@@ -21,7 +27,8 @@ interface PlayerStore {
   isQueueOpen: boolean;
   isLyricsOpen: boolean;
 
-  setCurrentTrack: (track: Song) => void;
+  setCurrentTrack: (track: Song, context?: PlaybackContext | null) => void;
+  setPlaybackContext: (ctx: PlaybackContext | null) => void;
   setQueue: (songs: Song[], startIndex?: number) => void;
   addToQueue: (song: Song) => void;
   playNext: () => void;
@@ -46,6 +53,7 @@ interface PlayerStore {
 export const usePlayerStore = create<PlayerStore>()(
   subscribeWithSelector((set, get) => ({
     currentTrack: null,
+    playbackContext: null,
     queue: [],
     queueIndex: 0,
     status: 'idle',
@@ -60,7 +68,14 @@ export const usePlayerStore = create<PlayerStore>()(
     isQueueOpen: false,
     isLyricsOpen: false,
 
-    setCurrentTrack: (track) => set({ currentTrack: track, error: null, status: 'loading', bufferedTime: 0 }),
+    setCurrentTrack: (track, context = null) => set({
+      currentTrack: track,
+      playbackContext: context,
+      error: null,
+      status: 'loading',
+      bufferedTime: 0,
+    }),
+    setPlaybackContext: (ctx) => set({ playbackContext: ctx }),
     setQueue: (songs, startIndex = 0) => set({ queue: songs, queueIndex: startIndex }),
     addToQueue: (song) => set((s) => ({ queue: [...s.queue, song] })),
     playNext: () => {

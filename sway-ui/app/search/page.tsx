@@ -137,7 +137,15 @@ export default function SearchPage() {
           {(tab === 'all' || tab === 'songs') && songs.length > 0 && (
             <section>
               <h2 className="text-base font-semibold text-[--foreground] mb-3 px-1">Songs</h2>
-              {songObjects.map((s, i) => <SongRow key={`${s.id}-${i}`} song={s} index={i} context={songObjects} />)}
+              {songObjects.map((s, i) => (
+                <SongRow
+                  key={`${s.id}-${i}`}
+                  song={s}
+                  index={i}
+                  context={songObjects}
+                  playbackContext={{ source: 'search', query }}
+                />
+              ))}
             </section>
           )}
           {(tab === 'all' || tab === 'artists') && artists.length > 0 && (

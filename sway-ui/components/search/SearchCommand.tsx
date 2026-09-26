@@ -118,7 +118,7 @@ export function SearchCommand() {
                           onClick={() => {
                             // Prefer enriched Song (with proper artists, lyrics_id, duration_ms)
                             const song = enrichedMap.get(item.id) ?? searchItemToSong(item);
-                            usePlayerStore.getState().setCurrentTrack(song);
+                            usePlayerStore.getState().setCurrentTrack(song, { source: 'search', query });
                             setOpen(false);
                           }}
                         >

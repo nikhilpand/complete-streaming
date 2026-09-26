@@ -1,7 +1,8 @@
 """
-SWAY Home Router — Multi-Shelf Personalized Feed
-Composes rich differentiated shelves (Quick Mix, Because You Listened, Artist Radar,
-Rediscover, Discover Mix) with zero fake data.
+SWAY Home Router — Multi-Shelf YouTube-Music-Style Progressive Feed
+Composes rich differentiated shelves (Trending, Popular Regional, Made For You,
+Because You Listened, Artist Radar, Recently Played, Rediscover, Discover Something New)
+with zero mock data and natural progressive personalization.
 """
 
 from __future__ import annotations
@@ -30,12 +31,14 @@ router = APIRouter(prefix="/home", tags=["home"])
 DEFAULT_HOME_QUERIES = [
     "top bollywood hits",
     "trending songs hindi",
-    "arijit singh romantic hits",
+    "arijit singh hits",
+    "atif aslam romantic",
     "chill acoustic hindi",
 ]
 
 
 async def _seed_catalog_if_empty(request: Request, engine) -> List[Track]:
+    """Hydrate catalog from provider if store contains fewer than 15 tracks."""
     catalog = engine.store.all_tracks()
     if len(catalog) >= 15:
         return catalog
@@ -45,12 +48,18 @@ async def _seed_catalog_if_empty(request: Request, engine) -> List[Track]:
         try:
             for q in DEFAULT_HOME_QUERIES:
                 res = await provider.search(q, n=10)
-                if res.songs:
-                    for s_item in res.songs:
+                songs = getattr(res, "enriched_songs", None) or getattr(res, "songs", None) or []
+                if songs:
+                    for s_item in songs:
                         try:
-                            full_song = await provider.get_song(s_item.id)
-                            track = song_to_engine_track(full_song)
-                            engine.store.upsert_tracks([track])
+                            # If item is already full Song, convert directly
+                            if hasattr(s_item, "duration_ms") and s_item.duration_ms:
+                                track = song_to_engine_track(s_item)
+                            else:
+                                full_song = await provider.get_song(s_item.id)
+                                track = song_to_engine_track(full_song or s_item)
+                            if track and track.id:
+                                engine.store.upsert_tracks([track])
                         except Exception:
                             pass
                 if len(engine.store.all_tracks()) >= 30:
@@ -62,18 +71,18 @@ async def _seed_catalog_if_empty(request: Request, engine) -> List[Track]:
 
 
 @router.get("", response_model=APIResponse, summary="Get personalized multi-shelf home feed")
+@router.get("/recommendations/home", response_model=APIResponse, summary="Canonical home recommendation feed alias")
 async def get_home_feed(
     request: Request,
     user_id: Optional[str] = Query(None, description="Optional user ID override"),
     limit_per_shelf: int = Query(10, ge=4, le=30, description="Max items per shelf"),
 ):
     """
-    Retrieve 5 distinct, personalized shelves:
-    1. Quick Mix (40% favorites, 25% similar artists, 20% taste, 15% discovery)
-    2. Because You Listened (Top-K similarity neighborhood)
-    3. Artist Radar (Top artist and contemporaries)
-    4. Rediscover (Past favorites)
-    5. Discover Mix (Novel tracks near user taste)
+    Retrieve YouTube-Music-style progressive Home feed:
+    - COLD users: Discovery-first shelves (Trending, Popular in India, New Releases, Discover Something New, Chill & Melodic).
+    - SEEDED users: Early personalization (Made for You, Because You Listened, Artist Radar, Trending, Discover).
+    - LEARNING users: Balanced mix (Made for You, Because You Listened, Recently Played, Artists You Like, New Music for You, Discover).
+    - PERSONALIZED users: Deep personalization with continued exploration (Made for You, Because You Listened, Your Artists, Recently Played, Rediscover, Trending for You, Discover Different).
     """
     effective_user_id = (
         user_id
@@ -87,23 +96,16 @@ async def get_home_feed(
 
     catalog = await _seed_catalog_if_empty(request, engine)
 
-    # If catalog is still empty (e.g. offline/mock environment), create default seed tracks
+    # If catalog is still empty (e.g. offline and no provider), return empty shelves without fake mock tracks
     if not catalog:
-        mock_seed = [
-            Track(
-                id=f"track_seed_{i}",
-                title=f"Sample Track {i}",
-                artist_id=f"art_{i % 3}",
-                artist_name=f"Artist {i % 3}",
-                genres=["bollywood", "romantic"],
-                moods=["chill"],
-                popularity=0.7,
-                provider_available={"saavn": True},
-            )
-            for i in range(15)
-        ]
-        engine.store.upsert_tracks(mock_seed)
-        catalog = engine.store.all_tracks()
+        return APIResponse(
+            success=True,
+            data={
+                "user_id": effective_user_id,
+                "state": profile.personalization_state.value,
+                "shelves": [],
+            },
+        )
 
     planner = MixPlanner(store=engine.store)
     shelves = planner.plan_home_feed(profile, catalog, limit_per_shelf=limit_per_shelf)
@@ -117,20 +119,28 @@ async def get_home_feed(
                 "title": s.title,
                 "subtitle": s.subtitle,
                 "badge": s.badge,
+                "reason": s.reason,
                 "items": [
                     {
                         "id": t.id,
+                        "provider": "jiosaavn",
+                        "provider_id": t.id,
+                        "type": "song",
                         "title": t.title,
+                        "subtitle": t.artist_name,
                         "artist_name": t.artist_name,
                         "artists": (
-                            [{"id": a.id, "name": a.name, "role": a.role} for a in t.artists]
+                            [{"id": a.id, "name": a.name, "role": a.role, "image_url": a.image_url} for a in t.artists]
                             if t.artists
                             else [{"id": t.artist_id, "name": t.artist_name, "role": "primary"}]
                         ),
                         "album": t.album,
+                        "album_id": t.album_id,
                         "year": t.year,
                         "language": t.language,
+                        "duration_ms": t.duration_ms,
                         "artwork_url": t.artwork_url,
+                        "has_media": True,
                         "energy": t.energy,
                         "popularity": t.popularity,
                     }
@@ -143,6 +153,7 @@ async def get_home_feed(
         success=True,
         data={
             "user_id": effective_user_id,
+            "state": profile.personalization_state.value,
             "shelves": shelves_data,
         },
     )

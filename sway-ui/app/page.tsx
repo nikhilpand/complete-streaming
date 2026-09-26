@@ -13,6 +13,7 @@ import type { Song } from '@/lib/api/types';
 
 export default function HomePage() {
   const [shelves, setShelves] = useState<HomeShelfData[]>([]);
+  const [feedState, setFeedState] = useState<'cold' | 'seeded' | 'learning' | 'personalized'>('cold');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,6 +27,7 @@ export default function HomePage() {
       const feed = await getHomeFeed(signal);
       if (feed && feed.shelves && feed.shelves.length > 0) {
         setShelves(feed.shelves);
+        if (feed.state) setFeedState(feed.state);
         return;
       }
       throw new Error('No shelves returned');
@@ -98,7 +100,7 @@ export default function HomePage() {
                 className="px-6 py-2.5 bg-[--foreground] text-[--surface] rounded-[--radius-md] text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer"
                 onClick={() => {
                   setQueue(primarySongs, 0);
-                  setCurrentTrack(featured);
+                  setCurrentTrack(featured, { source: primaryShelf.type });
                 }}
               >
                 Play Now
@@ -141,7 +143,13 @@ export default function HomePage() {
             )}
           </div>
           {primarySongs.slice(0, 10).map((s, i) => (
-            <SongRow key={s.id} song={s} index={i} context={primarySongs} />
+            <SongRow
+              key={s.id}
+              song={s}
+              index={i}
+              context={primarySongs}
+              playbackContext={{ source: primaryShelf.type }}
+            />
           ))}
         </section>
       ) : null}
@@ -174,7 +182,7 @@ export default function HomePage() {
                     className="group cursor-pointer"
                     onClick={() => {
                       setQueue(shelf.items, shelf.items.findIndex((x) => x.id === item.id));
-                      setCurrentTrack(item);
+                      setCurrentTrack(item, { source: shelf.type });
                     }}
                   >
                     <div className="relative aspect-square overflow-hidden rounded-[--radius-lg] bg-[--surface-elevated] mb-3">

@@ -101,22 +101,61 @@ class TasteProfileBuilder:
                 neg_base = EVENT_NEGATIVE.get(e.event_type, 0.0)
 
             ratio = e.played_ratio
+            is_search_intent = (
+                e.source == "search"
+                or (e.metadata and e.metadata.get("source") == "search")
+            )
+
             if e.event_type in {
                 EventType.PROGRESS,
                 EventType.COMPLETED,
                 EventType.PLAY_STARTED,
                 EventType.REPLAY,
+                EventType.PLAY_10S,
+                EventType.PLAY_30S,
+                EventType.PLAY_50PCT,
             }:
-                pos_base *= max(0.25, 0.55 + 0.9 * ratio)
-                if e.event_type == EventType.COMPLETED and ratio >= 0.9:
-                    pos_base *= 1.2
+                # Completion-aware calibration
+                if ratio >= 0.85 or e.event_type == EventType.COMPLETED:
+                    pos_base = max(pos_base, 1.4)
+                elif ratio >= 0.5 or e.event_type == EventType.PLAY_50PCT:
+                    pos_base = max(pos_base, 1.0)
+                elif ratio >= 0.25 or e.event_type == EventType.PLAY_30S:
+                    pos_base = max(pos_base, 0.65)
+                elif e.event_type == EventType.PLAY_10S or (e.position_ms and e.position_ms >= 10000):
+                    pos_base = max(pos_base, 0.40)
+                else:
+                    pos_base = max(0.20, pos_base * (0.4 + 0.6 * ratio))
+
                 if e.event_type == EventType.REPLAY:
-                    pos_base *= 1.2
-            elif e.event_type == EventType.SKIP:
-                if ratio >= 0.8:
-                    neg_base *= 0.35
-                elif ratio <= 0.08:
-                    neg_base *= 1.35
+                    pos_base *= 1.5
+
+                # Search -> play intent boost
+                if is_search_intent:
+                    pos_base *= 1.6
+
+            elif e.event_type in {EventType.SKIP, EventType.SKIP_LT_10S, EventType.SKIP_10_30S}:
+                # Early skip vs near-complete skip calibration
+                if e.event_type == EventType.SKIP_LT_10S or ratio <= 0.10 or (e.position_ms is not None and 0 < e.position_ms < 10000):
+                    # Very early skip: strong negative
+                    neg_base = max(neg_base, 1.8)
+                elif ratio >= 0.75:
+                    # Late skip after substantial listen: weak negative + slight positive
+                    neg_base *= 0.25
+                    pos_base = 0.35
+                elif ratio >= 0.40:
+                    # Partial listen
+                    neg_base *= 0.55
+                    pos_base = 0.20
+                else:
+                    neg_base = max(neg_base, 1.2)
+
+                if is_search_intent:
+                    # Searching for a track and sampling it is active exploration
+                    neg_base *= 0.75
+            elif e.event_type == EventType.SEARCH and e.query:
+                # Search query alone is a weak exploratory intent signal
+                pos_base = 0.35
 
             # Multi-horizon decays
             decay_long = self._decay_factor(age_days, self.decay.long_term_half_life_days)
@@ -213,6 +252,31 @@ class TasteProfileBuilder:
                     long_energy.append((track.energy, max(0.1, pos_long)))
 
                 recent_ids.append((event_ts, track.id, artist_id or "", track.album_id))
+            elif artist_id:
+                # Update artist affinity even if full track is not yet in catalog
+                ab_l = self._bucket(p.long_term.artist, artist_id)
+                ab_l.positive += pos_long
+                ab_l.negative += neg_long
+                ab_l.count += 1
+                ab_l.last_seen = event_ts.timestamp()
+                if is_in_rolling:
+                    ab_r = self._bucket(p.recent_30d.artist, artist_id)
+                    ab_r.positive += pos_recent
+                    ab_r.negative += neg_recent
+                    ab_r.count += 1
+                    ab_r.last_seen = event_ts.timestamp()
+            elif e.event_type == EventType.SEARCH and e.query:
+                # Connect search query with catalog artists
+                q_clean = e.query.lower().strip()
+                for c_t in catalog.values():
+                    if c_t.artist_name and q_clean in c_t.artist_name.lower():
+                        matched_artist = c_t.artist_id
+                        ab_l = self._bucket(p.long_term.artist, matched_artist)
+                        ab_l.positive += pos_long
+                        if is_in_rolling:
+                            ab_r = self._bucket(p.recent_30d.artist, matched_artist)
+                            ab_r.positive += pos_recent
+                        break
 
             # 3. Update negative memory
             tid = e.track_id or (track.id if track else None)

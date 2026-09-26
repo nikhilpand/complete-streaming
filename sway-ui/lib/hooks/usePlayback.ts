@@ -20,8 +20,10 @@ export function usePlayback() {
   const playheadRef = useRef<number>(0);
   const durationRef = useRef<number>(0);
   const activeTrackRef = useRef<Song | null>(null);
+  const activeContextRef = useRef<{ source?: string; query?: string } | null>(null);
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const playbackContext = usePlayerStore((s) => s.playbackContext);
   const status = usePlayerStore((s) => s.status);
   const setStatus = usePlayerStore((s) => s.setStatus);
   const setCurrentTime = usePlayerStore((s) => s.setCurrentTime);
@@ -32,6 +34,11 @@ export function usePlayback() {
   const setError = usePlayerStore((s) => s.setError);
   const playNext = usePlayerStore((s) => s.playNext);
 
+  // Keep activeContextRef synced
+  useEffect(() => {
+    activeContextRef.current = playbackContext;
+  }, [playbackContext]);
+
   // ── 1. Wire AudioManager events → store & telemetry ──
   useEffect(() => {
     if (!audioManager) return;
@@ -39,6 +46,18 @@ export function usePlayback() {
       switch (ev.type) {
         case 'play':
           setStatus('playing');
+          const pTrack = activeTrackRef.current;
+          if (pTrack && !milestonesFiredRef.current.play_started) {
+            milestonesFiredRef.current.play_started = true;
+            sendTelemetry({
+              event_type: 'play_started',
+              track_id: pTrack.id,
+              position_ms: Math.round(audioManager.currentTime * 1000) || 0,
+              duration_ms: Math.round((audioManager.duration || 0) * 1000) || pTrack.duration_ms,
+              source: activeContextRef.current?.source,
+              query: activeContextRef.current?.query,
+            });
+          }
           break;
         case 'pause':
           setStatus('paused');
@@ -68,6 +87,8 @@ export function usePlayback() {
                 track_id: track.id,
                 position_ms: Math.round(ev.currentTime * 1000),
                 duration_ms: Math.round(ev.duration * 1000),
+                source: activeContextRef.current?.source,
+                query: activeContextRef.current?.query,
               });
             }
             if (ev.currentTime >= 30 && !milestonesFiredRef.current.play_30s) {
@@ -77,6 +98,8 @@ export function usePlayback() {
                 track_id: track.id,
                 position_ms: Math.round(ev.currentTime * 1000),
                 duration_ms: Math.round(ev.duration * 1000),
+                source: activeContextRef.current?.source,
+                query: activeContextRef.current?.query,
               });
             }
             if (
@@ -91,6 +114,8 @@ export function usePlayback() {
                 position_ms: Math.round(ev.currentTime * 1000),
                 duration_ms: Math.round(ev.duration * 1000),
                 completion_ratio: ev.currentTime / ev.duration,
+                source: activeContextRef.current?.source,
+                query: activeContextRef.current?.query,
               });
             }
           }
@@ -112,6 +137,8 @@ export function usePlayback() {
               position_ms: Math.round(playheadRef.current * 1000),
               duration_ms: Math.round(durationRef.current * 1000),
               completion_ratio: 1.0,
+              source: activeContextRef.current?.source,
+              query: activeContextRef.current?.query,
             });
           }
           playNext();
@@ -232,6 +259,8 @@ export function usePlayback() {
           track_id: prevTrack.id,
           position_ms: Math.round(pos * 1000),
           duration_ms: Math.round(durationRef.current * 1000),
+          source: activeContextRef.current?.source,
+          query: activeContextRef.current?.query,
         });
       } else if (pos >= 10 && pos < 30) {
         sendTelemetry({
@@ -239,6 +268,8 @@ export function usePlayback() {
           track_id: prevTrack.id,
           position_ms: Math.round(pos * 1000),
           duration_ms: Math.round(durationRef.current * 1000),
+          source: activeContextRef.current?.source,
+          query: activeContextRef.current?.query,
         });
       }
     }

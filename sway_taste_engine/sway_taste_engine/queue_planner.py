@@ -9,8 +9,9 @@ from .storage import TasteStore
 class QueuePlanner:
     """Optimizes sequence transitions (A -> B -> C) to avoid abrupt mood/tempo cliffs."""
 
-    def __init__(self, weights: Optional[QueueWeights] = None):
+    def __init__(self, weights: Optional[QueueWeights] = None, store: Optional[TasteStore] = None):
         self.weights = weights or QueueWeights()
+        self.store = store
 
     def score_transition(
         self,
@@ -91,14 +92,48 @@ class QueuePlanner:
         profile: UserTasteProfile,
         store: Optional[TasteStore] = None,
         count: int = 10,
+        surface: str = "queue",
     ) -> List[Track]:
         scored: list[tuple[Track, float]] = []
+        seen_ids = set()
         for cand in candidates:
-            if cand.id == current_track.id:
+            if cand.id == current_track.id or cand.id in seen_ids:
                 continue
+            seen_ids.add(cand.id)
             s = self.score_transition(current_track, cand, profile, store=store)
             if s > -100.0:
                 scored.append((cand, s))
 
         scored.sort(key=lambda x: x[1], reverse=True)
-        return [t for t, _ in scored[:count]]
+
+        # Sequence construction with surface-specific anti-clustering
+        max_consecutive = 1 if surface != "artist_radio" else 3
+        sequence: List[Track] = []
+        remaining = [t for t, _ in scored]
+
+        prev_artist = (current_track.artist_id or current_track.artist_name.lower().strip()) if current_track else ""
+        consecutive_same_artist = 1 if prev_artist else 0
+
+        while remaining and len(sequence) < count:
+            pick_idx = None
+            for idx, cand in enumerate(remaining):
+                cand_artist = cand.artist_id or cand.artist_name.lower().strip()
+                if cand_artist and cand_artist == prev_artist and consecutive_same_artist >= max_consecutive:
+                    continue
+                pick_idx = idx
+                break
+
+            if pick_idx is None:
+                pick_idx = 0
+
+            chosen = remaining.pop(pick_idx)
+            chosen_artist = chosen.artist_id or chosen.artist_name.lower().strip()
+            if chosen_artist and chosen_artist == prev_artist:
+                consecutive_same_artist += 1
+            else:
+                consecutive_same_artist = 1
+                prev_artist = chosen_artist
+
+            sequence.append(chosen)
+
+        return sequence

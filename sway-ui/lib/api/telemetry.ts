@@ -57,6 +57,7 @@ export function getIdentityHeaders(): Record<string, string> {
 
 export interface TelemetryEvent {
   event_type:
+    | 'play_started'
     | 'play_10s'
     | 'play_30s'
     | 'play_50pct'
@@ -65,8 +66,11 @@ export interface TelemetryEvent {
     | 'skip_10_30s'
     | 'like'
     | 'dislike'
-    | 'replay';
-  track_id: string;
+    | 'replay'
+    | 'search';
+  track_id?: string;
+  source?: string;
+  query?: string;
   position_ms?: number;
   duration_ms?: number;
   completion_ratio?: number;
@@ -87,7 +91,9 @@ export function sendTelemetry(event: TelemetryEvent): void {
     anonymous_id: anonId,
     account_id: accountId,
     event_type: event.event_type,
-    track_id: event.track_id,
+    track_id: event.track_id || '',
+    source: event.source,
+    query: event.query,
     position_ms: event.position_ms,
     duration_ms: event.duration_ms,
     completion_ratio: event.completion_ratio,

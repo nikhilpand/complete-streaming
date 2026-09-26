@@ -113,8 +113,10 @@ def song_to_engine_track(song: Any) -> Track:
 
 class EventIn(BaseModel):
     user_id: str = "guest_user"
-    track_id: str
-    type: str  # play | play_started | play_completed | skip | like | unlike | replay | share
+    track_id: Optional[str] = ""
+    type: Optional[str] = None
+    event_type: Optional[str] = None
+    session_id: Optional[str] = None
     title: Optional[str] = None
     artist: Optional[str] = None
     album: Optional[str] = None
@@ -122,7 +124,11 @@ class EventIn(BaseModel):
     mood: Optional[str] = "chill"
     position_ms: Optional[int] = 0
     duration_ms: Optional[int] = 180000
+    completion_ratio: Optional[float] = None
     thumbnail: Optional[str] = None
+    source: Optional[str] = None
+    query: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class UserSettingsIn(BaseModel):
@@ -132,15 +138,24 @@ class UserSettingsIn(BaseModel):
 EVENT_MAP = {
     "play": EventType.PLAY_STARTED,
     "play_started": EventType.PLAY_STARTED,
+    "play_10s": EventType.PLAY_10S,
+    "play_30s": EventType.PLAY_30S,
+    "play_50pct": EventType.PLAY_50PCT,
     "play_complete": EventType.COMPLETED,
     "play_completed": EventType.COMPLETED,
+    "completed": EventType.COMPLETED,
     "skip": EventType.SKIP,
+    "skip_lt_10s": EventType.SKIP_LT_10S,
+    "skip_10_30s": EventType.SKIP_10_30S,
     "like": EventType.LIKE,
     "unlike": EventType.UNLIKE,
     "dislike": EventType.DISLIKE,
+    "not_interested": EventType.NOT_INTERESTED,
     "replay": EventType.REPLAY,
     "share": EventType.SAVE,
+    "save": EventType.SAVE,
     "add_to_playlist": EventType.SAVE,
+    "search": EventType.SEARCH,
 }
 
 
@@ -163,39 +178,69 @@ def post_event(e: EventIn):
     Note: POST /api/v1/events is maintained as a backward-compatible alias.
     """
     eng = get_taste_engine()
-    sid = clean_track_id(e.track_id)
-    evt_type = EVENT_MAP.get(e.type, EventType.PLAY_STARTED)
+    sid = clean_track_id(e.track_id) if e.track_id else ""
+    evt_raw = e.event_type or e.type or "play_started"
+    evt_type = EVENT_MAP.get(evt_raw, EventType.PLAY_STARTED)
 
     if e.thumbnail and sid:
         _artwork_cache[sid] = e.thumbnail
 
     # Auto-register track in taste engine catalog if not already present
-    track = eng.store.get_track(sid)
-    if not track:
-        track = Track(
-            id=sid,
-            title=e.title or f"Track {sid}",
-            artist_id=e.artist.lower().replace(" ", "_") if e.artist else "artist_unknown",
-            artist_name=e.artist or "Unknown Artist",
-            album_name=e.album or "Single",
-            genres=[e.genre] if e.genre else ["pop"],
-            moods=[e.mood] if e.mood else ["chill"],
-            energy=0.6,
-            bpm=110.0,
-            popularity=0.85,
-        )
-        eng.seed_catalog([track])
+    track = None
+    if sid:
+        track = eng.store.get_track(sid)
+        if not track:
+            track = Track(
+                id=sid,
+                title=e.title or f"Track {sid}",
+                artist_id=e.artist.lower().replace(" ", "_") if e.artist else "artist_unknown",
+                artist_name=e.artist or "Unknown Artist",
+                album_name=e.album or "Single",
+                genres=[e.genre] if e.genre else ["pop"],
+                moods=[e.mood] if e.mood else ["chill"],
+                energy=0.6,
+                bpm=110.0,
+                popularity=0.85,
+            )
+            eng.seed_catalog([track])
+
+    comp_ratio = e.completion_ratio
+    if comp_ratio is None and e.duration_ms and e.duration_ms > 0 and e.position_ms is not None:
+        comp_ratio = max(0.0, min(1.0, e.position_ms / e.duration_ms))
+    elif comp_ratio is None and evt_type == EventType.COMPLETED:
+        comp_ratio = 1.0
+
+    src = e.source or (e.metadata.get("source") if e.metadata else None)
+    qry = e.query or (e.metadata.get("query") if e.metadata else None)
+    meta = dict(e.metadata or {})
+    if e.title:
+        meta["title"] = e.title
+    if e.artist:
+        meta["artist"] = e.artist
+    if e.genre:
+        meta["genre"] = e.genre
+    if src:
+        meta["source"] = src
+    if qry:
+        meta["query"] = qry
+
+    artist_id = track.artist_id if track else (e.artist.lower().replace(" ", "_") if e.artist else None)
+    album_id = track.album_id if track else None
 
     user_event = UserEvent(
         event_id=f"evt_{uuid.uuid4().hex[:12]}",
         user_id=e.user_id,
-        session_id=f"sess_{e.user_id}",
+        session_id=e.session_id or f"sess_{e.user_id}",
         event_type=evt_type,
-        track_id=sid,
-        artist_id=track.artist_id,
-        album_id=track.album_id,
+        track_id=sid or None,
+        artist_id=artist_id,
+        album_id=album_id,
         position_ms=e.position_ms,
         duration_ms=e.duration_ms,
+        completion_ratio=comp_ratio,
+        source=src,
+        query=qry,
+        metadata=meta,
     )
 
     accepted = eng.ingest_event(user_event)
@@ -209,8 +254,8 @@ def post_event(e: EventIn):
                     user_event.event_id,
                     e.user_id,
                     sid,
-                    e.type,
-                    json.dumps({"title": e.title, "artist": e.artist, "genre": e.genre}),
+                    evt_raw,
+                    json.dumps(meta),
                     time.time(),
                 ),
             )
@@ -218,7 +263,23 @@ def post_event(e: EventIn):
     except Exception as ex:
         logger.warning("Failed to persist event to SQLite: %s", ex)
 
-    return {"ok": True, "accepted": accepted, "event": e.type, "track_id": sid}
+    return {"ok": True, "accepted": accepted, "event": evt_raw, "track_id": sid}
+
+
+@router.get(
+    "/recommendations/home",
+    summary="Get personalized multi-shelf home feed (canonical alias)",
+    tags=["recommendations"],
+)
+async def get_recommendations_home(
+    request: Request,
+    user_id: Optional[str] = Query(None, description="Optional user ID override"),
+    limit_per_shelf: int = Query(10, ge=4, le=30, description="Max items per shelf"),
+):
+    """Canonical recommendation endpoint for the YouTube-Music-style Home feed."""
+    from app.routers.home import get_home_feed
+    return await get_home_feed(request, user_id=user_id, limit_per_shelf=limit_per_shelf)
+
 
 
 class ShadowModeComparator:

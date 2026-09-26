@@ -55,6 +55,14 @@ class FeedType(str, Enum):
     TRENDING = "trending"
 
 
+class PersonalizationState(str, Enum):
+    COLD = "cold"
+    SEEDED = "seeded"
+    LEARNING = "learning"
+    PERSONALIZED = "personalized"
+
+
+
 class FeatureValue(BaseModel, Generic[T]):
     """
     Feature provenance container.
@@ -225,6 +233,10 @@ class HorizonTasteState(BaseModel):
     def mood_affinity(self) -> dict[str, float]:
         return {k: b.net for k, b in self.mood.items()}
 
+    @property
+    def track_affinity(self) -> dict[str, float]:
+        return {k: b.net for k, b in self.track.items()}
+
 
 class SessionTasteState(BaseModel):
     """Immediate listening context within the active session."""
@@ -295,6 +307,10 @@ class UserTasteProfile(BaseModel):
         return self.recent_30d.track
 
     @property
+    def track_affinity(self) -> dict[str, float]:
+        return self.recent_30d.track_affinity
+
+    @property
     def explicit_negative_tracks(self) -> set[str]:
         return self.negative_memory.explicit_negative_tracks
 
@@ -341,6 +357,28 @@ class UserTasteProfile(BaseModel):
     @long_term_energy.setter
     def long_term_energy(self, val: Optional[float]) -> None:
         self.long_term.mean_energy = val
+
+    @property
+    def personalization_state(self) -> PersonalizationState:
+        """
+        Derive personalization state based on accumulated meaningful interactions:
+        - COLD: No listening history or positive signals.
+        - SEEDED: 1-2 plays or early interaction seeds.
+        - LEARNING: 3-9 meaningful interactions.
+        - PERSONALIZED: 10+ interactions with multi-item preferences.
+        """
+        pos_tracks = sum(1 for b in self.recent_30d.track.values() if b.positive > 0)
+        total_pos = sum(b.positive for b in self.recent_30d.track.values()) + sum(b.positive for b in self.recent_30d.artist.values())
+        total_neg = sum(b.negative for b in self.recent_30d.track.values()) + sum(b.negative for b in self.recent_30d.artist.values())
+        meaningful_actions = total_pos + (total_neg * 0.5)
+
+        if pos_tracks == 0 and len(self.session_state.recent_tracks) == 0 and total_neg == 0 and self.total_events == 0:
+            return PersonalizationState.COLD
+        if pos_tracks <= 2 or meaningful_actions < 3.0 or self.total_events <= 2:
+            return PersonalizationState.SEEDED
+        if pos_tracks < 6 or meaningful_actions < 10.0 or self.total_events < 10:
+            return PersonalizationState.LEARNING
+        return PersonalizationState.PERSONALIZED
 
     def _make_bucket(self) -> Bucket:
         return Bucket()
