@@ -44,18 +44,46 @@ class LyricsStorage:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS lyrics_sync (
                     track_id TEXT PRIMARY KEY,
+                    canonical_track_key TEXT,
                     identity_hash TEXT NOT NULL,
+                    engine_version TEXT NOT NULL DEFAULT 'v4',
+                    provider TEXT,
+                    provider_track_id TEXT,
                     title TEXT NOT NULL,
                     artist TEXT NOT NULL,
                     duration_ms INTEGER,
                     sync_type TEXT NOT NULL,
                     document_json TEXT NOT NULL,
                     confidence REAL NOT NULL,
+                    match_confidence REAL DEFAULT 1.0,
+                    timing_confidence REAL DEFAULT 1.0,
+                    line_source_confidence REAL DEFAULT 1.0,
+                    alignment_confidence REAL DEFAULT 1.0,
                     engine TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
             """)
+
+            # Safe migrations for existing databases
+            cursor = await db.execute("PRAGMA table_info(lyrics_sync);")
+            cols = {row[1] for row in await cursor.fetchall()}
+            if "canonical_track_key" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN canonical_track_key TEXT;")
+            if "engine_version" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN engine_version TEXT NOT NULL DEFAULT 'v4';")
+            if "provider" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN provider TEXT;")
+            if "provider_track_id" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN provider_track_id TEXT;")
+            if "match_confidence" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN match_confidence REAL DEFAULT 1.0;")
+            if "timing_confidence" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN timing_confidence REAL DEFAULT 1.0;")
+            if "line_source_confidence" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN line_source_confidence REAL DEFAULT 1.0;")
+            if "alignment_confidence" not in cols:
+                await db.execute("ALTER TABLE lyrics_sync ADD COLUMN alignment_confidence REAL DEFAULT 1.0;")
 
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_lyrics_identity_hash
@@ -63,9 +91,17 @@ class LyricsStorage:
             """)
 
             await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lyrics_canonical_key
+                ON lyrics_sync (canonical_track_key);
+            """)
+
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS lyrics_jobs (
                     job_id TEXT PRIMARY KEY,
                     track_id TEXT NOT NULL,
+                    canonical_track_key TEXT,
+                    provider TEXT,
+                    provider_track_id TEXT,
                     identity_hash TEXT NOT NULL,
                     status TEXT NOT NULL,
                     progress REAL DEFAULT 0.0,
@@ -75,6 +111,16 @@ class LyricsStorage:
                     updated_at TEXT NOT NULL
                 );
             """)
+
+            # Safe migrations for jobs
+            j_cursor = await db.execute("PRAGMA table_info(lyrics_jobs);")
+            j_cols = {row[1] for row in await j_cursor.fetchall()}
+            if "canonical_track_key" not in j_cols:
+                await db.execute("ALTER TABLE lyrics_jobs ADD COLUMN canonical_track_key TEXT;")
+            if "provider" not in j_cols:
+                await db.execute("ALTER TABLE lyrics_jobs ADD COLUMN provider TEXT;")
+            if "provider_track_id" not in j_cols:
+                await db.execute("ALTER TABLE lyrics_jobs ADD COLUMN provider_track_id TEXT;")
 
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_identity_status
@@ -113,8 +159,40 @@ class LyricsStorage:
                 return None
             return LyricsDocument.model_validate_json(row["document_json"])
 
+    async def get_lyrics_by_canonical_key(
+        self,
+        canonical_track_key: str,
+        identity_hash: Optional[str] = None,
+    ) -> Optional[LyricsDocument]:
+        """Fetch lyrics document by canonical track key (e.g. 'youtube:xyz', 'saavn:123') and optional hash."""
+        await self.initialize()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if identity_hash:
+                cursor = await db.execute(
+                    """
+                    SELECT document_json FROM lyrics_sync
+                    WHERE (canonical_track_key = ? OR track_id = ?) AND identity_hash = ?
+                    ORDER BY confidence DESC LIMIT 1
+                    """,
+                    (canonical_track_key, canonical_track_key, identity_hash),
+                )
+            else:
+                cursor = await db.execute(
+                    """
+                    SELECT document_json FROM lyrics_sync
+                    WHERE canonical_track_key = ? OR track_id = ?
+                    ORDER BY confidence DESC LIMIT 1
+                    """,
+                    (canonical_track_key, canonical_track_key),
+                )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return LyricsDocument.model_validate_json(row["document_json"])
+
     async def save_lyrics(self, doc: LyricsDocument) -> None:
-        """Upsert a lyrics document."""
+        """Upsert a lyrics document with complete versioned fields."""
         await self.initialize()
         now = datetime.now(timezone.utc).isoformat()
         doc_json = doc.model_dump_json()
@@ -123,30 +201,49 @@ class LyricsStorage:
             await db.execute(
                 """
                 INSERT INTO lyrics_sync (
-                    track_id, identity_hash, title, artist, duration_ms,
-                    sync_type, document_json, confidence, engine, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    track_id, canonical_track_key, identity_hash, engine_version,
+                    provider, provider_track_id, title, artist, duration_ms,
+                    sync_type, document_json, confidence, match_confidence,
+                    timing_confidence, line_source_confidence, alignment_confidence,
+                    engine, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(track_id) DO UPDATE SET
+                    canonical_track_key = excluded.canonical_track_key,
                     identity_hash = excluded.identity_hash,
+                    engine_version = excluded.engine_version,
+                    provider = excluded.provider,
+                    provider_track_id = excluded.provider_track_id,
                     title = excluded.title,
                     artist = excluded.artist,
                     duration_ms = excluded.duration_ms,
                     sync_type = excluded.sync_type,
                     document_json = excluded.document_json,
                     confidence = excluded.confidence,
+                    match_confidence = excluded.match_confidence,
+                    timing_confidence = excluded.timing_confidence,
+                    line_source_confidence = excluded.line_source_confidence,
+                    alignment_confidence = excluded.alignment_confidence,
                     engine = excluded.engine,
                     updated_at = excluded.updated_at
                 WHERE excluded.confidence >= lyrics_sync.confidence
                 """,
                 (
                     doc.track_id,
+                    doc.canonical_track_key or doc.track_id,
                     doc.identity_hash,
+                    doc.engine_version,
+                    doc.provider,
+                    doc.provider_track_id,
                     doc.title,
                     doc.artist,
                     doc.duration_ms,
                     doc.sync_type.value,
                     doc_json,
                     doc.confidence,
+                    doc.match_confidence,
+                    doc.timing_confidence,
+                    doc.line_source_confidence,
+                    doc.alignment_confidence,
                     doc.engine_used or "unknown",
                     now,
                     now,
@@ -154,13 +251,24 @@ class LyricsStorage:
             )
             await db.commit()
 
-    async def create_job(self, job_id: str, track_id: str, identity_hash: str) -> AlignmentJob:
+    async def create_job(
+        self,
+        job_id: str,
+        track_id: str,
+        identity_hash: str,
+        canonical_track_key: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_track_id: Optional[str] = None,
+    ) -> AlignmentJob:
         """Create and queue a new alignment job."""
         await self.initialize()
         now = datetime.now(timezone.utc).isoformat()
         job = AlignmentJob(
             job_id=job_id,
             track_id=track_id,
+            canonical_track_key=canonical_track_key or track_id,
+            provider=provider,
+            provider_track_id=provider_track_id,
             identity_hash=identity_hash,
             status=JobStatus.QUEUED,
             progress=0.0,
@@ -169,12 +277,18 @@ class LyricsStorage:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """
-                INSERT INTO lyrics_jobs (job_id, track_id, identity_hash, status, progress, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO lyrics_jobs (
+                    job_id, track_id, canonical_track_key, provider, provider_track_id,
+                    identity_hash, status, progress, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job.job_id,
                     job.track_id,
+                    job.canonical_track_key,
+                    job.provider,
+                    job.provider_track_id,
                     job.identity_hash,
                     job.status.value,
                     job.progress,
@@ -201,6 +315,9 @@ class LyricsStorage:
             return AlignmentJob(
                 job_id=row["job_id"],
                 track_id=row["track_id"],
+                canonical_track_key=row["canonical_track_key"] if "canonical_track_key" in row.keys() else row["track_id"],
+                provider=row["provider"] if "provider" in row.keys() else None,
+                provider_track_id=row["provider_track_id"] if "provider_track_id" in row.keys() else None,
                 identity_hash=row["identity_hash"],
                 status=JobStatus(row["status"]),
                 progress=row["progress"],
@@ -229,6 +346,9 @@ class LyricsStorage:
             return AlignmentJob(
                 job_id=row["job_id"],
                 track_id=row["track_id"],
+                canonical_track_key=row["canonical_track_key"] if "canonical_track_key" in row.keys() else row["track_id"],
+                provider=row["provider"] if "provider" in row.keys() else None,
+                provider_track_id=row["provider_track_id"] if "provider_track_id" in row.keys() else None,
                 identity_hash=row["identity_hash"],
                 status=JobStatus(row["status"]),
                 progress=row["progress"],

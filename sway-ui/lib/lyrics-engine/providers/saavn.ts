@@ -1,7 +1,9 @@
 /**
  * saavn.ts
- * JioSaavn Lyrics Provider Adapter (Section 3.4)
+ * JioSaavn Lyrics Provider Adapter
+ *
  * Indian catalog specialist with response sanitization and plain lyrics candidate generation.
+ * Multi-candidate gathering: collects all matching candidate lyrics across IDs and search.
  */
 
 import { ILyricsProvider } from './base';
@@ -54,11 +56,16 @@ export class JioSaavnLyricsProvider implements ILyricsProvider {
 
     const startTime = Date.now();
     const candidates: LyricsCandidate[] = [];
+    const seenIds = new Set<string>();
+
     const directIds = [identity.providerTrackId, identity.providerId, identity.videoId].filter(Boolean) as string[];
 
     // 1. Direct lyrics fetch by provider id or song id
     for (const rawId of directIds) {
       const cleanId = rawId.replace(/^[a-zA-Z0-9_-]+:/, '');
+      if (seenIds.has(cleanId)) continue;
+      seenIds.add(cleanId);
+
       try {
         const res = await fetch(`${BACKEND_BASE}/api/v1/lyrics/${encodeURIComponent(cleanId)}`, {
           signal: signal || AbortSignal.timeout(3000),
@@ -79,8 +86,9 @@ export class JioSaavnLyricsProvider implements ILyricsProvider {
               sourceReference: 'JioSaavn Official Lyrics',
               providerConfidence: 0.92,
               fetchedAtMs: Date.now(),
+              timingProvenance: 'PLAIN',
+              timingConfidence: 0.0,
             });
-            break;
           }
         }
       } catch {
@@ -88,14 +96,14 @@ export class JioSaavnLyricsProvider implements ILyricsProvider {
       }
     }
 
-    // 2. Search fallback on backend if no candidate found yet
-    if (candidates.length === 0 && normalized.cleanTitle) {
+    // 2. Search candidates on backend
+    if (normalized.cleanTitle) {
       try {
         const searchQ = normalized.primaryArtist
           ? `${normalized.cleanTitle} ${normalized.primaryArtist}`
           : normalized.cleanTitle;
 
-        const res = await fetch(`${BACKEND_BASE}/api/v1/search?q=${encodeURIComponent(searchQ)}&n=3`, {
+        const res = await fetch(`${BACKEND_BASE}/api/v1/search?q=${encodeURIComponent(searchQ)}&n=5`, {
           signal: signal || AbortSignal.timeout(3500),
         });
 
@@ -105,16 +113,19 @@ export class JioSaavnLyricsProvider implements ILyricsProvider {
           for (const s of songs) {
             if (!s?.id) continue;
             const cleanId = s.id.replace(/^[a-zA-Z0-9_-]+:/, '');
+            if (seenIds.has(cleanId)) continue;
+            seenIds.add(cleanId);
+
             const [lyrRes, songRes] = await Promise.all([
               fetch(`${BACKEND_BASE}/api/v1/songs/${encodeURIComponent(cleanId)}/lyrics`, {
                 signal: signal || AbortSignal.timeout(3000),
-              }),
+              }).catch(() => null),
               fetch(`${BACKEND_BASE}/api/v1/songs/${encodeURIComponent(cleanId)}`, {
                 signal: signal || AbortSignal.timeout(3000),
               }).catch(() => null),
             ]);
 
-            if (lyrRes.ok) {
+            if (lyrRes && lyrRes.ok) {
               const lyrData = await lyrRes.json();
               const songData = songRes && songRes.ok ? await songRes.json() : null;
               const text = lyrData.data?.plain || lyrData.data?.lyrics;
@@ -137,8 +148,9 @@ export class JioSaavnLyricsProvider implements ILyricsProvider {
                   sourceReference: 'JioSaavn Search',
                   providerConfidence: 0.88,
                   fetchedAtMs: Date.now(),
+                  timingProvenance: 'PLAIN',
+                  timingConfidence: 0.0,
                 });
-                break;
               }
             }
           }

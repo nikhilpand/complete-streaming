@@ -41,21 +41,31 @@ class GenerateLyricsRequest(BaseModel):
     duration_ms: Optional[int] = None
     lines: List[LyricsLine] = Field(default_factory=list)
     identity_hash: Optional[str] = None
+    recording_key: Optional[str] = None
+    canonical_track_id: Optional[str] = None
+    provider: Optional[str] = None
+    provider_track_id: Optional[str] = None
     stream_url: Optional[str] = None
 
 
 @router.get("/sync/{track_id}", response_model=APIResponse, summary="Get synchronized lyrics from persistent store")
 async def get_synchronized_lyrics(
     track_id: str,
-    identity_hash: Optional[str] = Query(None, description="Optional canonical identity hash"),
+    identity_hash: Optional[str] = Query(None, description="Optional canonical identity hash or recording key"),
+    canonical_track_key: Optional[str] = Query(None, description="Optional canonical track key (e.g. 'youtube:xyz')"),
 ):
     """
     Check if a high-quality synchronized or word-aligned lyrics document
     exists in the persistent store for this track.
     """
+    key = canonical_track_key or track_id
     doc = None
     if identity_hash:
-        doc = await storage.get_lyrics_by_hash(identity_hash)
+        doc = await storage.get_lyrics_by_canonical_key(key, identity_hash)
+        if not doc:
+            doc = await storage.get_lyrics_by_hash(identity_hash)
+    if not doc:
+        doc = await storage.get_lyrics_by_canonical_key(key)
     if not doc:
         doc = await storage.get_lyrics_by_id(track_id)
 
@@ -90,14 +100,37 @@ async def generate_word_alignment(
     """
     provider = getattr(request.app.state, "provider", None)
 
-    # Compute identity hash if not provided
-    ident_hash = payload.identity_hash
+    # Determine canonical track key and provider namespace safely
+    canonical_key = payload.canonical_track_id or track_id
+    if canonical_key.startswith("youtube:"):
+        prov = "youtube"
+        p_track_id = payload.provider_track_id or canonical_key.split("youtube:", 1)[1]
+    elif canonical_key.startswith("saavn:"):
+        prov = "saavn"
+        p_track_id = payload.provider_track_id or canonical_key.split("saavn:", 1)[1]
+    else:
+        prov = payload.provider or "saavn"
+        p_track_id = payload.provider_track_id or track_id
+
+    # Compute canonical recording fingerprint if not provided
+    ident_hash = payload.recording_key or payload.identity_hash
     if not ident_hash:
-        raw_key = f"{payload.title.strip().lower()}|{payload.artist.strip().lower()}|{int((payload.duration_ms or 0) / 5000)}"
-        ident_hash = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:16]
+        raw_key = (
+            f"provider={prov}|"
+            f"provider_id={p_track_id}|"
+            f"canonical={canonical_key}|"
+            f"title={payload.title.strip().lower()}|"
+            f"artist={payload.artist.strip().lower()}|"
+            f"album={(payload.album or '').strip().lower()}|"
+            f"dur_bucket={int((payload.duration_ms or 0) / 1000)}"
+        )
+        ident_hash = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:32]
 
     job = await alignment_worker.enqueue_alignment(
         track_id=track_id,
+        canonical_track_key=canonical_key,
+        provider=prov,
+        provider_track_id=p_track_id,
         identity_hash=ident_hash,
         title=payload.title,
         artist=payload.artist,

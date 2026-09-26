@@ -7,6 +7,7 @@ import numpy as np
 from app.services.alignment.models import (
     LyricsLine,
     LyricsWord,
+    WordTimingType,
     LyricsDocument,
     SyncType,
     JobStatus,
@@ -142,6 +143,82 @@ def test_whisper_engine_interpolation_fallback():
     assert words[-1].end_ms == 4000
     assert words[0].end_ms <= words[1].start_ms
     assert words[1].end_ms <= words[2].start_ms
+    assert words[0].timing_type == WordTimingType.INTERPOLATED
+
+
+def test_indian_language_detection():
+    from app.services.alignment.normalizer import detect_language, is_roman_indic
+
+    # Roman Hindi / Hinglish
+    hindi_roman = "tum hi aana mera dil kya kare tere bina"
+    is_indic, lang = is_roman_indic(hindi_roman)
+    assert is_indic is True
+    assert lang == "hi"
+    assert detect_language(hindi_roman) == "hi"
+
+    # Roman Punjabi / Pinglish
+    punjabi_roman = "nach nach ke ve soniye dholna vich"
+    is_indic_p, lang_p = is_roman_indic(punjabi_roman)
+    assert is_indic_p is True
+    assert lang_p == "pa"
+    assert detect_language(punjabi_roman) == "pa"
+
+    # English
+    english_text = "I feel it coming with the starboy lights"
+    assert detect_language(english_text) == "en"
+
+    # Metadata priority
+    assert detect_language("some generic words", metadata_language="hi") == "hi"
+    assert detect_language("some generic words", metadata_language="punjabi") == "pa"
+
+
+def test_whisper_engine_match_tokens_tags_acoustic_anchors():
+    engine = WhisperAlignmentEngine()
+    pairs = [("Tum", "tum"), ("hi", "hi"), ("aana", "aana")]
+    recognized = [
+        ("tum", 1.0, 1.4, 0.95),
+        ("hi", 1.42, 1.8, 0.92),
+        ("aana", 1.82, 2.5, 0.88),
+    ]
+
+    words = engine._match_tokens_to_words(
+        pairs=pairs,
+        recognized=recognized,
+        window_start_ms=0,
+        line_start_ms=1000,
+        line_end_ms=3000,
+    )
+
+    assert len(words) == 3
+    assert words[0].timing_type == WordTimingType.ACOUSTIC_ANCHOR
+    assert words[1].timing_type == WordTimingType.ACOUSTIC_ANCHOR
+    assert words[2].timing_type == WordTimingType.ACOUSTIC_ANCHOR
+    assert words[0].confidence >= 0.85
+
+
+def test_whisper_engine_tags_interpolated_when_unanchored():
+    engine = WhisperAlignmentEngine()
+    pairs = [("Tum", "tum"), ("aur", "aur"), ("main", "main")]
+    # Only "tum" and "main" recognized; "aur" is missing
+    recognized = [
+        ("tum", 1.0, 1.3, 0.90),
+        ("main", 2.2, 2.8, 0.85),
+    ]
+
+    words = engine._match_tokens_to_words(
+        pairs=pairs,
+        recognized=recognized,
+        window_start_ms=0,
+        line_start_ms=1000,
+        line_end_ms=3000,
+    )
+
+    assert len(words) == 3
+    assert words[0].timing_type == WordTimingType.ACOUSTIC_ANCHOR
+    assert words[1].timing_type == WordTimingType.INTERPOLATED
+    assert words[2].timing_type == WordTimingType.ACOUSTIC_ANCHOR
+    assert words[1].start_ms >= words[0].end_ms
+    assert words[1].end_ms <= words[2].start_ms
 
 
 @pytest.mark.asyncio
@@ -150,9 +227,18 @@ async def test_storage_repository_roundtrip(tmp_path):
     store = LyricsStorage(db_path=db_file)
     await store.initialize()
 
-    # Create job
-    job = await store.create_job(job_id="job_t1", track_id="song_1", identity_hash="hash_abc")
+    # Create job with canonical_track_key and provider
+    job = await store.create_job(
+        job_id="job_t1",
+        track_id="song_1",
+        identity_hash="hash_abc",
+        canonical_track_key="youtube:song_1",
+        provider="youtube",
+        provider_track_id="song_1",
+    )
     assert job.status == JobStatus.QUEUED
+    assert job.canonical_track_key == "youtube:song_1"
+    assert job.provider == "youtube"
 
     # Update job
     await store.update_job("job_t1", JobStatus.PROCESSING, progress=0.5)
@@ -161,16 +247,24 @@ async def test_storage_repository_roundtrip(tmp_path):
     assert fetched_job.status == JobStatus.PROCESSING
     assert fetched_job.progress == 0.5
 
-    # Save lyrics doc
+    # Save lyrics doc with complete versioned fields
     doc = LyricsDocument(
         id="doc_t1",
         track_id="song_1",
+        canonical_track_key="youtube:song_1",
+        provider="youtube",
+        provider_track_id="song_1",
         identity_hash="hash_abc",
+        engine_version="v4",
         title="Test Song",
         artist="Test Artist",
         duration_ms=180000,
         sync_type=SyncType.DERIVED_WORD,
         confidence=0.94,
+        match_confidence=1.0,
+        timing_confidence=0.94,
+        line_source_confidence=1.0,
+        alignment_confidence=0.92,
         source_provider="alignment_worker",
         lines=[
             LyricsLine(
@@ -179,8 +273,8 @@ async def test_storage_repository_roundtrip(tmp_path):
                 end_ms=2500,
                 original="Hello world",
                 words=[
-                    LyricsWord(text="Hello", start_ms=1000, end_ms=1700, confidence=0.95),
-                    LyricsWord(text="world", start_ms=1750, end_ms=2500, confidence=0.93),
+                    LyricsWord(text="Hello", start_ms=1000, end_ms=1700, confidence=0.95, timing_type=WordTimingType.ACOUSTIC_ANCHOR),
+                    LyricsWord(text="world", start_ms=1750, end_ms=2500, confidence=0.93, timing_type=WordTimingType.ACOUSTIC_ANCHOR),
                 ],
             )
         ],
@@ -190,7 +284,53 @@ async def test_storage_repository_roundtrip(tmp_path):
     retrieved = await store.get_lyrics_by_hash("hash_abc")
     assert retrieved is not None
     assert retrieved.track_id == "song_1"
+    assert retrieved.canonical_track_key == "youtube:song_1"
+    assert retrieved.engine_version == "v4"
+    assert retrieved.alignment_confidence == 0.92
     assert retrieved.sync_type == SyncType.DERIVED_WORD
     assert len(retrieved.lines) == 1
     assert len(retrieved.lines[0].words) == 2
     assert retrieved.lines[0].words[0].text == "Hello"
+    assert retrieved.lines[0].words[0].timing_type == WordTimingType.ACOUSTIC_ANCHOR
+
+    # Also lookup by canonical track key
+    by_key = await store.get_lyrics_by_canonical_key("youtube:song_1", "hash_abc")
+    assert by_key is not None
+    assert by_key.id == "doc_t1"
+
+
+@pytest.mark.asyncio
+async def test_failed_alignment_calibration_contract(tmp_path):
+    db_file = tmp_path / "test_fallback.db"
+    store = LyricsStorage(db_path=db_file)
+    await store.initialize()
+
+    # Create fallback document when word alignment fails
+    fallback_doc = LyricsDocument(
+        id="doc_fb_1",
+        track_id="song_failed_align",
+        canonical_track_key="youtube:song_failed_align",
+        provider="youtube",
+        provider_track_id="song_failed_align",
+        identity_hash="hash_fail_1",
+        engine_version="v4",
+        title="Failed Alignment Song",
+        artist="Artist",
+        sync_type=SyncType.LINE,
+        lines=[LyricsLine(id=1, start_ms=1000, end_ms=3000, original="Just lines")],
+        confidence=0.85,
+        match_confidence=1.0,
+        timing_confidence=0.85,
+        line_source_confidence=0.85,
+        alignment_confidence=0.0,  # Exact calibration invariant: 0.0 on failed alignment
+        source_provider="alignment_fallback",
+        engine_used="line_fallback",
+    )
+    await store.save_lyrics(fallback_doc)
+
+    retrieved = await store.get_lyrics_by_canonical_key("youtube:song_failed_align")
+    assert retrieved is not None
+    assert retrieved.sync_type == SyncType.LINE
+    assert retrieved.line_source_confidence == 0.85
+    assert retrieved.alignment_confidence == 0.0
+    assert retrieved.confidence == 0.85

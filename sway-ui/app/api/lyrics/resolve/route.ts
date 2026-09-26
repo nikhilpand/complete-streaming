@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveLyrics } from '@/lib/lyrics-engine/ultraLyricsResolver';
 
+const ENGINE_VERSION = 'v4';
+
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
 
@@ -24,6 +26,28 @@ export async function GET(req: NextRequest) {
   const songId = searchParams.get('songId') || searchParams.get('id') || undefined;
   const isrc = searchParams.get('isrc') || undefined;
   const lyricsId = searchParams.get('lyricsId') || undefined;
+  const streamUrl = searchParams.get('stream_url') || searchParams.get('streamUrl') || undefined;
+
+  let provider: string | undefined = searchParams.get('provider') || undefined;
+  let providerTrackId: string | undefined;
+
+  if (songId) {
+    if (songId.startsWith('youtube:') || songId.startsWith('yt:')) {
+      provider = 'youtube';
+      providerTrackId = songId.replace(/^(?:youtube|yt):/, '');
+    } else if (songId.startsWith('saavn:')) {
+      provider = 'saavn';
+      providerTrackId = songId.replace(/^saavn:/, '');
+    } else if (songId.includes(':')) {
+      const parts = songId.split(':');
+      provider = parts[0];
+      providerTrackId = parts.slice(1).join(':');
+    } else {
+      providerTrackId = songId;
+    }
+  } else if (lyricsId) {
+    providerTrackId = lyricsId;
+  }
 
   if (!title.trim()) {
     return NextResponse.json(
@@ -40,13 +64,22 @@ export async function GET(req: NextRequest) {
       album,
       subtitle,
       durationMs,
-      videoId: videoId || (songId && !songId.includes(':') ? songId : undefined),
-      providerId: songId && songId.includes(':') ? songId.split(':')[0] : undefined,
-      providerTrackId: songId ? (songId.includes(':') ? songId.split(':')[1] : songId) : lyricsId,
+      videoId: videoId || (provider === 'youtube' ? providerTrackId : undefined),
+      provider,
+      providerId: provider,
+      providerTrackId,
       isrc,
+      streamUrl,
     });
 
     const isFound = doc.status === 'FOUND';
+    const recKey = doc.identity.recordingKey || 'default';
+    const etag = `W/"lyrics:${ENGINE_VERSION}:${recKey}"`;
+
+    // Check If-None-Match
+    if (req.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, { status: 304 });
+    }
 
     return NextResponse.json(
       {
@@ -66,7 +99,9 @@ export async function GET(req: NextRequest) {
       {
         status: 200,
         headers: {
-          'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=43200',
+          'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=1800',
+          ETag: etag,
+          'X-Lyrics-Engine-Version': ENGINE_VERSION,
         },
       }
     );

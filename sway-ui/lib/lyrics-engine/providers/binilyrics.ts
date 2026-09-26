@@ -1,8 +1,10 @@
 /**
  * binilyrics.ts
- * BiniLyrics / LyricsPlus Provider Adapter (Used by Vivi-Music, YouLy+, ArchiveTune)
+ * BiniLyrics / LyricsPlus Provider Adapter
  *
  * Fetches Apple Music / TTML word-by-word synchronized lyrics from lyricsplus mirrors.
+ * Multi-candidate gathering: accumulates candidates across queries and mirrors instead
+ * of terminating at the first response.
  */
 
 import { ILyricsProvider } from './base';
@@ -38,6 +40,9 @@ export class BiniLyricsProvider implements ILyricsProvider {
         queries.push({ title: tit, artist: art });
       }
     }
+
+    const candidates: LyricsCandidate[] = [];
+    const seenSignatures = new Set<string>();
 
     for (const q of queries) {
       if (!q.title.trim()) continue;
@@ -81,6 +86,12 @@ export class BiniLyricsProvider implements ILyricsProvider {
             continue;
           }
 
+          const signature = `${data.type}:${data.metadata?.title || q.title}:${lyrics.length}`;
+          if (seenSignatures.has(signature)) {
+            continue;
+          }
+          seenSignatures.add(signature);
+
           if (data.type === 'Word') {
             const richSync: RichSyncLine[] = lyrics.map((l: any) => ({
               ts: l.time / 1000.0,
@@ -96,21 +107,21 @@ export class BiniLyricsProvider implements ILyricsProvider {
             const lastLine = richSync[richSync.length - 1];
             const derivedDurationMs = lastLine ? Math.round(lastLine.te * 1000) : (data.metadata?.duration ? data.metadata.duration * 1000 : identity.durationMs);
 
-            return [
-              {
-                providerId: 'binilyrics',
-                providerTrackId: data.metadata?.title || q.title,
-                title: data.metadata?.title || q.title,
-                artists: [q.artist],
-                durationMs: derivedDurationMs,
-                richSync,
-                plainLyrics: plainText,
-                instrumental: false,
-                sourceReference: `binilyrics:${data.metadata?.source || 'apple'}`,
-                providerConfidence: 0.98,
-                fetchedAtMs: Date.now(),
-              },
-            ];
+            candidates.push({
+              providerId: 'binilyrics',
+              providerTrackId: data.metadata?.title || q.title,
+              title: data.metadata?.title || q.title,
+              artists: [data.metadata?.artist || q.artist],
+              durationMs: derivedDurationMs,
+              richSync,
+              plainLyrics: plainText,
+              instrumental: false,
+              sourceReference: `binilyrics:${data.metadata?.source || 'apple'}:${mirror}`,
+              providerConfidence: 0.98,
+              fetchedAtMs: Date.now(),
+              timingProvenance: 'AUTHENTIC_WORD',
+              timingConfidence: 0.96,
+            });
           } else if (data.type === 'Line') {
             const lrcLines = lyrics
               .map((l: any) => {
@@ -126,29 +137,29 @@ export class BiniLyricsProvider implements ILyricsProvider {
             const lastLine = lyrics[lyrics.length - 1];
             const derivedDurationMs = lastLine?.time ? Math.round(lastLine.time + 3000) : (data.metadata?.duration ? data.metadata.duration * 1000 : identity.durationMs);
 
-            return [
-              {
-                providerId: 'binilyrics',
-                providerTrackId: data.metadata?.title || q.title,
-                title: data.metadata?.title || q.title,
-                artists: [q.artist],
-                durationMs: derivedDurationMs,
-                syncedLyrics: lrcLines,
-                plainLyrics: lyrics.map((l: any) => l.text).join('\n'),
-                instrumental: false,
-                sourceReference: `binilyrics:${data.metadata?.source || 'line'}`,
-                providerConfidence: 0.92,
-                fetchedAtMs: Date.now(),
-              },
-            ];
+            candidates.push({
+              providerId: 'binilyrics',
+              providerTrackId: data.metadata?.title || q.title,
+              title: data.metadata?.title || q.title,
+              artists: [data.metadata?.artist || q.artist],
+              durationMs: derivedDurationMs,
+              syncedLyrics: lrcLines,
+              plainLyrics: lyrics.map((l: any) => l.text).join('\n'),
+              instrumental: false,
+              sourceReference: `binilyrics:${data.metadata?.source || 'line'}:${mirror}`,
+              providerConfidence: 0.92,
+              fetchedAtMs: Date.now(),
+              timingProvenance: 'LINE',
+              timingConfidence: 0.88,
+            });
           }
         } catch {
-          // Fall through to next mirror / query
+          // Continue to next mirror / query
         }
       }
     }
 
-    return [];
+    return candidates;
   }
 }
 

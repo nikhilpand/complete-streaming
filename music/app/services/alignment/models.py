@@ -34,12 +34,19 @@ class JobStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class WordTimingType(str, Enum):
+    ACOUSTIC_ANCHOR = "ACOUSTIC_ANCHOR"
+    INTERPOLATED = "INTERPOLATED"
+    UNCERTAIN = "UNCERTAIN"
+
+
 class LyricsWord(_Base):
     """Word-level timestamped unit within a lyric line."""
     text: str
     start_ms: int
     end_ms: int
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    timing_type: WordTimingType = Field(default=WordTimingType.ACOUSTIC_ANCHOR)
 
 
 class LyricsLine(_Base):
@@ -58,7 +65,11 @@ class LyricsDocument(_Base):
     """Canonical persistent lyrics document."""
     id: str
     track_id: str
+    canonical_track_key: Optional[str] = None
+    provider: Optional[str] = None
+    provider_track_id: Optional[str] = None
     identity_hash: str
+    engine_version: str = "v4"
     title: str
     artist: str
     album: Optional[str] = None
@@ -67,6 +78,10 @@ class LyricsDocument(_Base):
     lines: list[LyricsLine] = Field(default_factory=list)
     plain_text: Optional[str] = None
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    match_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    timing_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    line_source_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    alignment_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     source_provider: str
     engine_used: Optional[str] = None
     language: Optional[str] = None
@@ -78,6 +93,9 @@ class AlignmentJob(_Base):
     """Asynchronous job descriptor for word alignment tasks."""
     job_id: str
     track_id: str
+    canonical_track_key: Optional[str] = None
+    provider: Optional[str] = None
+    provider_track_id: Optional[str] = None
     identity_hash: str
     status: JobStatus = JobStatus.QUEUED
     progress: float = Field(default=0.0, ge=0.0, le=1.0)

@@ -313,8 +313,9 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       containerRef.current.style.setProperty('transform', 'translate3d(0, 0px, 0)', 'important');
     }
 
-    const trackArtist = currentTrack.artist || '';
+    const trackArtist = currentTrack.artist || currentTrack.subtitle || '';
     const trackDuration = currentTrack.duration || duration || 0;
+    const streamUrl = typeof window !== 'undefined' ? (audioManager as any)?.currentSrc : undefined;
 
     fetchLyrics(
       currentTrack.id,
@@ -323,7 +324,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       currentTrack.album,
       currentTrack.subtitle,
       trackDuration,
-      currentTrack.lyricsId
+      currentTrack.lyricsId,
+      streamUrl
     )
       .then((data) => {
         if (cancelled) return;
@@ -378,8 +380,13 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           setLyricsSyncQuality('NONE');
           setProvenance({
             syncType: 'NONE',
+            timingProvenance: 'PLAIN',
             timingSource: 'unknown',
             isAuthenticTiming: false,
+            matchConfidence: 0,
+            timingConfidence: 0,
+            acousticConfidence: 0,
+            overallConfidence: 0,
             confidence: 0,
           });
           const plainLines: string[] = data.plain

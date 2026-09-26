@@ -1,77 +1,19 @@
 /**
  * unison.ts
- * Unison Provider Adapter (Crowdsourced Sync Engine used by Vivi-Music & Better-Lyrics)
+ * Unison Provider Adapter
  *
  * Supports TTML word-level (richsync) and LRC line-level (linesync) synchronized lyrics.
+ * Multi-candidate gathering: queries videoId, clean title, and original title strategies,
+ * accumulating all valid candidates.
  */
 
 import { ILyricsProvider } from './base';
-import { TrackIdentity, LyricsCandidate, RichSyncLine } from '../types';
+import { TrackIdentity, LyricsCandidate } from '../types';
 import { NormalizedMetadata } from '../normalizer';
 import { providerHealthTracker } from '../health';
+import { parseTtmlToRichSync } from '../parsers/richsyncParser';
 
 const UNISON_BASE = 'https://unison.boidu.dev';
-
-function parseTtmlTime(str: string): number {
-  if (!str) return 0;
-  const clean = str.trim().replace(/s$/i, '');
-  const parts = clean.split(':');
-  if (parts.length === 3) {
-    return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
-  }
-  if (parts.length === 2) {
-    return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
-  }
-  return parseFloat(clean) || 0;
-}
-
-function parseTtmlToRichSync(ttml: string): { richSync: RichSyncLine[]; plainText: string } {
-  const richSync: RichSyncLine[] = [];
-  const plainLines: string[] = [];
-
-  const pRegex = /<p\s+[^>]*begin=["']([^"']+)["'][^>]*end=["']([^"']+)["'][^>]*>([\s\S]*?)<\/p>/gi;
-  const spanRegex = /<span\s+[^>]*begin=["']([^"']+)["'][^>]*end=["']([^"']+)["'][^>]*>([\s\S]*?)<\/span>/gi;
-
-  let pMatch: RegExpExecArray | null;
-  while ((pMatch = pRegex.exec(ttml)) !== null) {
-    const pBegin = parseTtmlTime(pMatch[1]);
-    const pEnd = parseTtmlTime(pMatch[2]);
-    const innerHtml = pMatch[3];
-
-    const words: Array<{ c: string; o: number }> = [];
-    let sMatch: RegExpExecArray | null;
-
-    spanRegex.lastIndex = 0;
-    while ((sMatch = spanRegex.exec(innerHtml)) !== null) {
-      const sBegin = parseTtmlTime(sMatch[1]);
-      const rawText = sMatch[3].replace(/<[^>]+>/g, '').trim();
-      if (rawText) {
-        words.push({
-          c: rawText + ' ',
-          o: Math.max(0, sBegin - pBegin),
-        });
-      }
-    }
-
-    const lineText = innerHtml.replace(/<[^>]+>/g, '').trim();
-    if (lineText) {
-      plainLines.push(lineText);
-    }
-
-    if (words.length > 0) {
-      richSync.push({
-        ts: pBegin,
-        te: pEnd,
-        l: words,
-      });
-    }
-  }
-
-  return {
-    richSync,
-    plainText: plainLines.join('\n'),
-  };
-}
 
 export class UnisonProvider implements ILyricsProvider {
   readonly providerId = 'unison';
@@ -111,6 +53,9 @@ export class UnisonProvider implements ILyricsProvider {
       strategies.push(url);
     }
 
+    const candidates: LyricsCandidate[] = [];
+    const seenIds = new Set<string>();
+
     for (const urlStr of strategies) {
       try {
         const timeoutSignal = AbortSignal.timeout(3000);
@@ -142,70 +87,62 @@ export class UnisonProvider implements ILyricsProvider {
 
         providerHealthTracker.recordSuccess('unison', latencyMs);
         const item = json.data;
+        const candidateKey = String(item.id || item.videoId || urlStr);
+        if (seenIds.has(candidateKey)) {
+          continue;
+        }
+        seenIds.add(candidateKey);
+
         const rawLyrics = item.lyrics;
 
         // Parse depending on format
         if (item.format === 'ttml' || item.syncType === 'richsync') {
           const { richSync, plainText } = parseTtmlToRichSync(rawLyrics);
           if (richSync.length >= 3) {
-            return [
-              {
-                providerId: 'unison',
-                providerTrackId: String(item.id || item.videoId || cleanTitle),
-                title: item.song || cleanTitle,
-                artists: [item.artist || primaryArtist],
-                album: item.album || identity.album,
-                durationMs: item.duration ? item.duration * 1000 : identity.durationMs,
-                richSync,
-                plainLyrics: plainText,
-                instrumental: false,
-                sourceReference: `unison:ttml:${item.id || 'direct'}`,
-                providerConfidence: 0.96,
-                fetchedAtMs: Date.now(),
-              },
-            ];
+            candidates.push({
+              providerId: 'unison',
+              providerTrackId: String(item.id || item.videoId || cleanTitle),
+              videoId: item.videoId || identity.videoId,
+              title: item.song || cleanTitle,
+              artists: [item.artist || primaryArtist],
+              album: item.album || identity.album,
+              durationMs: item.duration ? item.duration * 1000 : identity.durationMs,
+              richSync,
+              plainLyrics: plainText,
+              instrumental: false,
+              sourceReference: `unison:ttml:${item.id || 'direct'}`,
+              providerConfidence: 0.96,
+              fetchedAtMs: Date.now(),
+              timingProvenance: 'AUTHENTIC_WORD',
+              timingConfidence: 0.94,
+            });
           }
         } else if (item.format === 'lrc' || item.syncType === 'linesync') {
           const plainText = rawLyrics.replace(/\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/g, '').trim();
-          return [
-            {
-              providerId: 'unison',
-              providerTrackId: String(item.id || item.videoId || cleanTitle),
-              title: item.song || cleanTitle,
-              artists: [item.artist || primaryArtist],
-              album: item.album || identity.album,
-              durationMs: item.duration ? item.duration * 1000 : identity.durationMs,
-              syncedLyrics: rawLyrics,
-              plainLyrics: plainText,
-              instrumental: false,
-              sourceReference: `unison:lrc:${item.id || 'direct'}`,
-              providerConfidence: 0.90,
-              fetchedAtMs: Date.now(),
-            },
-          ];
-        } else if (typeof rawLyrics === 'string' && rawLyrics.trim().length > 30) {
-          return [
-            {
-              providerId: 'unison',
-              providerTrackId: String(item.id || item.videoId || cleanTitle),
-              title: item.song || cleanTitle,
-              artists: [item.artist || primaryArtist],
-              album: item.album || identity.album,
-              durationMs: item.duration ? item.duration * 1000 : identity.durationMs,
-              plainLyrics: rawLyrics.trim(),
-              instrumental: false,
-              sourceReference: `unison:plain:${item.id || 'direct'}`,
-              providerConfidence: 0.75,
-              fetchedAtMs: Date.now(),
-            },
-          ];
+          candidates.push({
+            providerId: 'unison',
+            providerTrackId: String(item.id || item.videoId || cleanTitle),
+            videoId: item.videoId || identity.videoId,
+            title: item.song || cleanTitle,
+            artists: [item.artist || primaryArtist],
+            album: item.album || identity.album,
+            durationMs: item.duration ? item.duration * 1000 : identity.durationMs,
+            syncedLyrics: rawLyrics,
+            plainLyrics: plainText,
+            instrumental: false,
+            sourceReference: `unison:lrc:${item.id || 'direct'}`,
+            providerConfidence: 0.90,
+            fetchedAtMs: Date.now(),
+            timingProvenance: 'LINE',
+            timingConfidence: 0.86,
+          });
         }
       } catch {
         // Fall through to next strategy
       }
     }
 
-    return [];
+    return candidates;
   }
 }
 

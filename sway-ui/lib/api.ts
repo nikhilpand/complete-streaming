@@ -3,7 +3,7 @@
  */
 
 import { artUrl } from './utils';
-import type { LyricsTimingProvenance } from './lyrics-engine/types';
+import type { LyricsTimingProvenance, LyricsSyncType, SyncQuality } from './lyrics-engine/types';
 
 export function getProxiedImageUrl(url?: string, width = 500, height = 500): string {
   if (!url) return '';
@@ -13,7 +13,7 @@ export function getProxiedImageUrl(url?: string, width = 500, height = 500): str
 export interface LyricsResponse {
   status?: 'FOUND' | 'NOT_FOUND';
   synced: boolean;
-  syncQuality?: 'NONE' | 'LINE' | 'WORD' | 'DERIVED_WORD';
+  syncQuality?: SyncQuality;
   provenance?: LyricsTimingProvenance;
   provider?: string;
   confidence?: number;
@@ -40,7 +40,9 @@ export interface LyricsResponse {
 
 /**
  * Intelligent Ultra Lyrics Resolver client (Section 32 Frontend Contract)
- * Connects to /api/lyrics/resolve for unified multi-tier resolution.
+ * Connects exclusively to /api/lyrics/resolve for unified multi-tier resolution.
+ * All candidate ranking, validation, identity matching, and alignment logic is
+ * centralized inside the Ultra Lyrics Engine.
  */
 export async function fetchLyrics(
   videoId?: string,
@@ -49,11 +51,11 @@ export async function fetchLyrics(
   album?: string,
   subtitle?: string,
   duration?: number,
-  lyricsId?: string
+  lyricsId?: string,
+  streamUrl?: string
 ): Promise<LyricsResponse> {
   if (!title || !title.trim()) return { synced: false, status: 'NOT_FOUND' };
 
-  // 1. Primary: Call Ultra Lyrics Engine API route
   try {
     const params = new URLSearchParams({
       title: title.trim(),
@@ -64,6 +66,7 @@ export async function fetchLyrics(
     if (duration && duration > 0) params.set('duration', duration.toString());
     if (videoId) params.set('songId', videoId);
     if (lyricsId) params.set('lyricsId', lyricsId);
+    if (streamUrl) params.set('stream_url', streamUrl);
 
     const res = await fetch(`/api/lyrics/resolve?${params.toString()}`);
     if (res.ok) {
@@ -72,8 +75,8 @@ export async function fetchLyrics(
       const doc = json.data || json;
 
       if (isFound && doc) {
-        const isSynced = doc.syncQuality === 'LINE' || doc.syncQuality === 'WORD' || doc.capabilities?.lineSync;
-        const hasWordTiming = doc.syncQuality === 'WORD' || doc.capabilities?.wordSync;
+        const isSynced = doc.syncQuality === 'LINE' || doc.syncQuality === 'WORD' || doc.syncQuality === 'DERIVED_WORD' || doc.capabilities?.lineSync;
+        const hasWordTiming = doc.syncQuality === 'WORD' || doc.syncQuality === 'DERIVED_WORD' || doc.capabilities?.wordSync;
 
         // Map lines to time / endTime in seconds for lyric rendering stage
         const mappedLines = (isSynced && Array.isArray(doc.lines))
@@ -98,14 +101,9 @@ export async function fetchLyrics(
           status: 'FOUND',
           synced: isSynced,
           syncQuality: doc.syncQuality || (isSynced ? (hasWordTiming ? 'WORD' : 'LINE') : 'NONE'),
-          provenance: doc.provenance || {
-            syncType: isSynced ? (hasWordTiming ? 'WORD' : 'LINE') : 'NONE',
-            timingSource: (doc.source?.provider || doc.provider || 'unknown') as any,
-            isAuthenticTiming: Boolean(hasWordTiming || (isSynced && mappedLines && mappedLines.length > 0)),
-            confidence: doc.confidence || doc.source?.confidence || 0.95,
-          },
+          provenance: doc.provenance,
           hasWordTiming,
-          provider: doc.source?.provider || doc.provider || 'lrclib',
+          provider: doc.source?.provider || doc.provider || 'unknown',
           confidence: doc.confidence || doc.source?.confidence || 0.95,
           isDevanagari: doc.capabilities?.romanized || mappedLines?.some((l: any) => /[\u0900-\u097F]/.test(l.text)),
           capabilities: doc.capabilities,
@@ -115,67 +113,23 @@ export async function fetchLyrics(
       }
     }
   } catch (e) {
-    console.warn('UltraLyrics API fetch failed, falling back to direct client search', e);
+    console.warn('UltraLyrics canonical resolver fetch failed:', e);
   }
 
-  // 2. Direct client fallback to LRCLIB if server route is unavailable
-  const rawTitle = title.trim();
-  const cleanTitle = rawTitle.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/\s*-\s*.*/, '').trim() || rawTitle;
-  const primaryArtist = (artist || '').split(/[,&/|]/)[0].trim();
-
-  try {
-    const q = primaryArtist ? `${cleanTitle} ${primaryArtist}` : cleanTitle;
-    const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`, {
-      headers: { 'Lrclib-Client': 'SwayMusic/2.0' },
-    });
-    if (res.ok) {
-      const list = await res.json();
-      if (Array.isArray(list) && list.length > 0) {
-        const syncedItem = list.find((item: any) => item.syncedLyrics);
-        if (syncedItem) {
-          return {
-            status: 'FOUND',
-            synced: true,
-            syncQuality: 'LINE',
-            provenance: {
-              syncType: 'LINE',
-              timingSource: 'lrclib',
-              isAuthenticTiming: true,
-              confidence: 0.85,
-            },
-            lrc: syncedItem.syncedLyrics,
-            provider: 'lrclib',
-            confidence: 0.85,
-          };
-        }
-        const plainItem = list.find((item: any) => item.plainLyrics);
-        if (plainItem) {
-          return {
-            status: 'FOUND',
-            synced: false,
-            syncQuality: 'NONE',
-            provenance: {
-              syncType: 'NONE',
-              timingSource: 'lrclib',
-              isAuthenticTiming: false,
-              confidence: 0.80,
-            },
-            plain: plainItem.plainLyrics,
-            provider: 'lrclib',
-            confidence: 0.80,
-          };
-        }
-      }
-    }
-  } catch (_) {}
-
+  // Clean failure / not-found state without bypassing engine
   return {
     synced: false,
     status: 'NOT_FOUND',
+    syncQuality: 'NONE',
     provenance: {
       syncType: 'NONE',
+      timingProvenance: 'PLAIN',
       timingSource: 'unknown',
       isAuthenticTiming: false,
+      matchConfidence: 0,
+      timingConfidence: 0,
+      acousticConfidence: 0,
+      overallConfidence: 0,
       confidence: 0,
     },
   };

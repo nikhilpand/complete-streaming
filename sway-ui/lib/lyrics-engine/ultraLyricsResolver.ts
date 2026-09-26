@@ -1,11 +1,19 @@
 /**
  * ultraLyricsResolver.ts
- * Master Resolution Coordinator for Ultra Lyrics Engine 2.0 (Sections 1, 7, 9, 10, 12, 13, 14, 29)
+ * Master Resolution Coordinator for Ultra Lyrics Engine 2.0
+ *
+ * Implements competitive candidate architecture:
+ * 1. Checks memory cache
+ * 2. Fetches persistent backend authentic & derived records as CANDIDATES (not authorities)
+ * 3. Fetches fresh candidates concurrently across all external providers
+ * 4. Merges all candidates into a unified pool
+ * 5. Deterministic scoring, structural validation, and tier-based selection
+ * 6. Authentic timing contract: DERIVED_WORD is never marked as authentic provider timing
  */
 
 import { createTrackIdentity } from './identity';
 import { normalizeMetadata } from './normalizer';
-import { validateCandidate } from './validator';
+import { validateCandidate, validateWordSyncStructure } from './validator';
 import { scoreLyricsCandidate, evaluateAcceptance } from './matcher';
 import { parseStrictLRC } from './parsers/lrcParser';
 import { parseRichSync } from './parsers/richsyncParser';
@@ -18,9 +26,11 @@ import {
   LyricsLine,
   SyncQuality,
   LyricsSyncType,
+  TimingProvenanceType,
   TimingSource,
   LyricsTimingProvenance,
   MatchScoreBreakdown,
+  RichSyncLine,
 } from './types';
 
 // Provider adapters
@@ -51,8 +61,10 @@ export interface ResolveRequestParams {
   duration?: number; // seconds
   videoId?: string;
   isrc?: string;
+  provider?: string;
   providerId?: string;
   providerTrackId?: string;
+  streamUrl?: string;
 }
 
 export async function resolveLyrics(params: ResolveRequestParams): Promise<LyricsDocument> {
@@ -62,99 +74,117 @@ export async function resolveLyrics(params: ResolveRequestParams): Promise<Lyric
     return createEmptyDocument(identity);
   }
 
-  // 1. Fast Path: Check L1 Memory Cache (Section 18 & 30)
-  const cached = lyricsL1Cache.get(identity.identityHash);
+  // 1. Fast Path: Check L1 Memory Cache keyed by canonical recordingKey
+  const cached = lyricsL1Cache.get(identity.recordingKey) || lyricsL1Cache.get(identity.identityHash);
   if (cached) {
     return cached;
   }
 
-  // 2. In-Flight Request Deduplication (Section 20)
-  return inFlightDeduplicator.run(identity.identityHash, () => executeResolution(identity));
+  // 2. In-Flight Request Deduplication by recordingKey
+  return inFlightDeduplicator.run(identity.recordingKey, () => executeResolution(identity, params.streamUrl));
 }
 
 const BACKEND_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000') + '/api/v1';
 
-async function fetchBackendSynchronizedLyrics(identity: TrackIdentity): Promise<LyricsDocument | null> {
+/**
+ * Fetches cached sync from persistent storage as a competing candidate.
+ * The cache is NEVER an unconditional authority.
+ */
+async function fetchBackendCachedCandidate(identity: TrackIdentity): Promise<LyricsCandidate | null> {
   try {
-    const trackId = identity.providerTrackId || identity.videoId || 'track';
+    const trackParam = identity.canonicalTrackKey || identity.providerTrackId || identity.videoId || 'track';
     const res = await fetch(
-      `${BACKEND_BASE}/lyrics/sync/${encodeURIComponent(trackId)}?identity_hash=${encodeURIComponent(identity.identityHash)}`,
+      `${BACKEND_BASE}/lyrics/sync/${encodeURIComponent(trackParam)}?identity_hash=${encodeURIComponent(identity.recordingKey)}`,
       { signal: AbortSignal.timeout(600) }
     );
     if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.success || !data.data) return null;
+    const json = await res.json();
+    if (!json.success || !json.data) return null;
 
-    const dbDoc = data.data;
-    if (dbDoc.sync_type !== 'WORD' && dbDoc.sync_type !== 'DERIVED_WORD') {
+    const dbDoc = json.data;
+    const isWord = dbDoc.sync_type === 'WORD';
+    const isDerived = dbDoc.sync_type === 'DERIVED_WORD';
+    const isLine = dbDoc.sync_type === 'LINE';
+
+    if (!isWord && !isDerived && !isLine) {
       return null;
     }
 
-    const lines: LyricsLine[] = (dbDoc.lines || []).map((l: any, idx: number) => ({
-      id: l.id ?? idx,
-      startMs: l.start_ms,
-      endMs: l.end_ms,
-      original: l.original,
-      romanized: l.romanized,
-      isInstrumental: Boolean(l.is_instrumental),
-      words: (l.words || []).map((w: any) => ({
-        text: w.text,
-        startMs: w.start_ms,
-        endMs: w.end_ms,
-      })),
-    }));
+    // Convert stored lines to RichSyncLine format if word-timed
+    let candidateRichSync: RichSyncLine[] | undefined;
+    if ((isWord || isDerived) && Array.isArray(dbDoc.lines) && dbDoc.lines.length > 0) {
+      candidateRichSync = dbDoc.lines.map((l: any) => ({
+        ts: (l.start_ms ?? 0) / 1000.0,
+        te: (l.end_ms ?? (l.start_ms ?? 0) + 3000) / 1000.0,
+        l: (l.words || []).map((w: any) => ({
+          c: w.text + ' ',
+          o: Math.max(0, (w.start_ms - (l.start_ms ?? 0)) / 1000.0),
+          d: Math.max(0.04, (w.end_ms - w.start_ms) / 1000.0),
+        })),
+      }));
+    }
 
-    const translitResult = enrichLinesWithRomanization(lines);
+    // Convert to LRC if line-synced
+    let candidateLrc: string | undefined;
+    if (isLine && Array.isArray(dbDoc.lines)) {
+      candidateLrc = dbDoc.lines
+        .map((l: any) => {
+          const totalSec = (l.start_ms ?? 0) / 1000.0;
+          const m = Math.floor(totalSec / 60);
+          const s = Math.floor(totalSec % 60);
+          const ms = Math.floor((totalSec % 1) * 100);
+          return `[${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(2, '0')}] ${l.original || ''}`;
+        })
+        .join('\n');
+    }
+
+    const timingProvenance: TimingProvenanceType = isWord
+      ? 'AUTHENTIC_WORD'
+      : isDerived
+      ? 'DERIVED_WORD'
+      : 'LINE';
 
     return {
-      status: 'FOUND',
-      identity: {
-        title: dbDoc.title || identity.title,
-        artist: dbDoc.artist || identity.artists.join(', '),
-        album: dbDoc.album || identity.album,
-        durationMs: dbDoc.duration_ms || identity.durationMs,
-        version: identity.version,
-      },
-      source: {
-        provider: dbDoc.source_provider || 'alignment_worker',
-        confidence: dbDoc.confidence || 0.95,
-        sourceReference: dbDoc.engine_used,
-      },
-      syncQuality: dbDoc.sync_type === 'DERIVED_WORD' ? 'DERIVED_WORD' : 'WORD',
-      provenance: {
-        syncType: dbDoc.sync_type === 'DERIVED_WORD' ? 'WORD' : 'SYLLABLE',
-        timingSource: 'backend-alignment',
-        isAuthenticTiming: true,
-        confidence: dbDoc.confidence || 0.95,
-      },
-      lines: translitResult.lines,
-      plainText: dbDoc.plain_text,
-      capabilities: {
-        plain: Boolean(dbDoc.plain_text),
-        lineSync: true,
-        wordSync: true,
-        romanized: translitResult.hasRomanizedContent,
-      },
-      confidence: dbDoc.confidence || 0.95,
-      cachedAtMs: Date.now(),
+      providerId: 'backend-alignment',
+      providerTrackId: identity.providerTrackId,
+      videoId: identity.videoId,
+      title: dbDoc.title || identity.title,
+      artists: dbDoc.artist ? [dbDoc.artist] : identity.artists,
+      album: dbDoc.album || identity.album,
+      durationMs: dbDoc.duration_ms || identity.durationMs,
+      richSync: candidateRichSync,
+      syncedLyrics: candidateLrc,
+      plainLyrics: dbDoc.plain_text,
+      instrumental: false,
+      sourceReference: `cached:${dbDoc.engine_used || 'db'}`,
+      providerConfidence: dbDoc.confidence || 0.90,
+      fetchedAtMs: Date.now(),
+      timingProvenance,
+      timingConfidence: isWord ? 0.96 : isDerived ? (dbDoc.timing_confidence || 0.78) : 0.85,
+      acousticConfidence: isDerived ? (dbDoc.alignment_confidence || dbDoc.confidence || 0.75) : 0.0,
     };
   } catch {
     return null;
   }
 }
 
-function triggerBackendAlignment(identity: TrackIdentity, lines: LyricsLine[]) {
+function triggerBackendAlignment(identity: TrackIdentity, lines: LyricsLine[], streamUrl?: string) {
   try {
-    const trackId = identity.providerTrackId || identity.videoId || 'track';
-    fetch(`${BACKEND_BASE}/lyrics/${encodeURIComponent(trackId)}/generate`, {
+    const trackParam = identity.canonicalTrackKey || identity.providerTrackId || identity.videoId || 'track';
+    fetch(`${BACKEND_BASE}/lyrics/${encodeURIComponent(trackParam)}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        provider: identity.provider,
+        provider_track_id: identity.providerTrackId,
+        canonical_track_id: identity.canonicalTrackKey,
         title: identity.title,
         artist: identity.artists.join(', '),
         album: identity.album,
         duration_ms: identity.durationMs,
-        identity_hash: identity.identityHash,
+        identity_hash: identity.recordingKey,
+        recording_key: identity.recordingKey,
+        stream_url: streamUrl,
         lines: lines.map((l) => ({
           id: l.id,
           start_ms: l.startMs,
@@ -171,37 +201,31 @@ function triggerBackendAlignment(identity: TrackIdentity, lines: LyricsLine[]) {
   }
 }
 
-async function executeResolution(identity: TrackIdentity): Promise<LyricsDocument> {
-  // 2.5 Check Persistent Database Cache for high-quality WORD or DERIVED_WORD sync
-  const persistentDoc = await fetchBackendSynchronizedLyrics(identity);
-  if (persistentDoc) {
-    lyricsL1Cache.set(identity.identityHash, persistentDoc);
-    return persistentDoc;
-  }
-
+async function executeResolution(identity: TrackIdentity, streamUrl?: string): Promise<LyricsDocument> {
   const normalized = normalizeMetadata(identity);
 
-  // 3. Parallel Provider Resolution with Isolated Timeouts (Section 7)
+  // 1. Concurrently fetch cached candidate and fresh provider candidates
+  const cachedPromise = fetchBackendCachedCandidate(identity);
   const providerPromises = PROVIDERS.map(async (provider) => {
     try {
-      const perProviderSignal = AbortSignal.timeout(3000);
+      const perProviderSignal = AbortSignal.timeout(3500);
       return await provider.resolveCandidates(identity, normalized, perProviderSignal);
     } catch {
       return [] as LyricsCandidate[];
     }
   });
 
-  const candidateArrays = await Promise.allSettled(providerPromises);
-
-  console.log('Provider results:', candidateArrays.map((r, i) => ({
-    provider: PROVIDERS[i]?.providerId,
-    status: r.status,
-    count: r.status === 'fulfilled' ? r.value?.length : 0,
-    error: r.status === 'rejected' ? (r as any).reason?.message : undefined,
-  })));
+  const [cachedResult, ...providerResults] = await Promise.allSettled([cachedPromise, ...providerPromises]);
 
   const allCandidates: LyricsCandidate[] = [];
-  for (const res of candidateArrays) {
+
+  // Add backend cached candidate if found
+  if (cachedResult.status === 'fulfilled' && cachedResult.value) {
+    allCandidates.push(cachedResult.value);
+  }
+
+  // Add all fresh provider candidates
+  for (const res of providerResults) {
     if (res.status === 'fulfilled' && Array.isArray(res.value)) {
       allCandidates.push(...res.value);
     }
@@ -209,11 +233,11 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
 
   if (allCandidates.length === 0) {
     const emptyDoc = createEmptyDocument(identity);
-    lyricsL1Cache.set(identity.identityHash, emptyDoc);
+    lyricsL1Cache.set(identity.recordingKey, emptyDoc);
     return emptyDoc;
   }
 
-  // 4. Candidate Validation & Deterministic Scoring (Sections 9, 10 & 11)
+  // 2. Candidate Validation & Deterministic Scoring
   const scoredCandidates: Array<{
     candidate: LyricsCandidate;
     score: MatchScoreBreakdown;
@@ -225,8 +249,6 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
     const score = scoreLyricsCandidate(identity, cand, validation.isValid);
     const decision = evaluateAcceptance(score.totalScore);
 
-    console.log(`[Candidate Score] Provider=${cand.providerId} Title="${cand.title}" Total=${score.totalScore} Decision=${decision} Valid=${validation.isValid} Reason=${validation.reason || score.rejectionReason || 'ok'}`);
-
     if (decision !== 'REJECT') {
       scoredCandidates.push({ candidate: cand, score, decision });
     }
@@ -234,48 +256,65 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
 
   if (scoredCandidates.length === 0) {
     const emptyDoc = createEmptyDocument(identity);
-    lyricsL1Cache.set(identity.identityHash, emptyDoc);
+    lyricsL1Cache.set(identity.recordingKey, emptyDoc);
     return emptyDoc;
   }
 
-  // 5. Select Best Candidate (Section 1 & 9)
-  // Tie-breaker:
-  // Preference 1: Genuine WORD sync (richsync) with valid corroboration (>= 0.70) over LINE sync over PLAIN
-  // Preference 2: AUTO_ACCEPT over CORROBORATED_ACCEPT over FALLBACK_ONLY
-  // Preference 3: Highest totalScore
+  // 3. Select Best Candidate (Competitive Hierarchy)
+  // Tier 4: Authentic word sync (Bini/Unison/Musixmatch richsync) with score >= 0.70
+  // Tier 3: Derived word sync (cached audio-aligned) with score >= 0.75
+  // Tier 2: Line-synced lyrics with score >= 0.65
+  // Tier 1: Plain lyrics
   scoredCandidates.sort((a, b) => {
     const getSyncTier = (c: LyricsCandidate, s: MatchScoreBreakdown) => {
-      // Real word sync with acceptable match score is gold standard
-      if (c.richSync && c.richSync.length >= 3 && s.totalScore >= 0.70) return 3;
-      // Line sync with good confidence
-      if (c.syncedLyrics && s.totalScore >= 0.65) return 2;
+      const isWord = c.richSync && c.richSync.length >= 3;
+      if (isWord && c.timingProvenance === 'AUTHENTIC_WORD' && s.totalScore >= 0.70) {
+        return 4;
+      }
+      if (isWord && c.timingProvenance === 'DERIVED_WORD' && s.totalScore >= 0.75) {
+        return 3;
+      }
+      if (isWord && s.totalScore >= 0.70) {
+        return 3;
+      }
+      if (c.syncedLyrics && s.totalScore >= 0.65) {
+        return 2;
+      }
       return 1;
     };
 
-    const syncTierDiff = getSyncTier(b.candidate, b.score) - getSyncTier(a.candidate, a.score);
-    if (syncTierDiff !== 0) return syncTierDiff;
+    const tierDiff = getSyncTier(b.candidate, b.score) - getSyncTier(a.candidate, a.score);
+    if (tierDiff !== 0) return tierDiff;
 
     const rankOrder = { AUTO_ACCEPT: 3, CORROBORATED_ACCEPT: 2, FALLBACK_ONLY: 1, REJECT: 0 };
     const decisionDiff = rankOrder[b.decision] - rankOrder[a.decision];
     if (decisionDiff !== 0) return decisionDiff;
 
-    return b.score.totalScore - a.score.totalScore;
+    // Within same tier, rank by composite (match score + timing confidence)
+    const compositeA = a.score.totalScore * 0.40 + (a.candidate.timingConfidence ?? 0.75) * 0.60;
+    const compositeB = b.score.totalScore * 0.40 + (b.candidate.timingConfidence ?? 0.75) * 0.60;
+    return compositeB - compositeA;
   });
 
   const winner = scoredCandidates[0];
   const bestCandidate = winner.candidate;
 
-  // 6. Synchronization Normalization (Sections 12, 13 & 14)
-  // Section 14 Core Rule: NEVER fabricate word karaoke. Real word sync only.
+  // 4. Parse & Normalize Lyrics Structure
   let syncQuality: SyncQuality = 'NONE';
   let lines: LyricsLine[] = [];
   let plainText = bestCandidate.plainLyrics;
+  let wordSyncValid = false;
 
   if (bestCandidate.richSync && bestCandidate.richSync.length > 0) {
     const parsedRich = parseRichSync(bestCandidate.richSync);
     if (parsedRich.lines.length > 0) {
       lines = parsedRich.lines;
-      syncQuality = parsedRich.isWordSyncValid ? 'WORD' : 'LINE';
+      wordSyncValid = parsedRich.isWordSyncValid;
+      if (wordSyncValid) {
+        syncQuality = bestCandidate.timingProvenance === 'DERIVED_WORD' ? 'DERIVED_WORD' : 'WORD';
+      } else {
+        syncQuality = 'LINE';
+      }
       if (!plainText) {
         plainText = lines.map((l) => l.original).join('\n');
       }
@@ -299,17 +338,17 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
     syncQuality = 'NONE';
   }
 
-  // 7. Script Detection & Transliteration (Sections 23, 24, 25, 27 & 28)
+  // 5. Script Detection & Transliteration
   const translitResult = enrichLinesWithRomanization(lines);
 
-  // 8. Assemble Unified Lyrics Document with Timing Provenance
+  // 6. Build Detailed Provenance with Strict Authenticity Contract
   let syncType: LyricsSyncType = 'NONE';
   let hasSyllableTiming = false;
   if (bestCandidate.richSync && bestCandidate.richSync.length > 0) {
     hasSyllableTiming = bestCandidate.richSync.some((line) => line.l?.some((w) => typeof w.d === 'number' && w.d > 0));
   }
 
-  if (syncQuality === 'WORD') {
+  if (syncQuality === 'WORD' || syncQuality === 'DERIVED_WORD') {
     syncType = hasSyllableTiming ? 'SYLLABLE' : 'WORD';
   } else if (syncQuality === 'LINE') {
     syncType = 'LINE';
@@ -323,16 +362,40 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
     musixmatch: 'musixmatch',
     lrclib: 'lrclib',
     jiosaavn: 'saavn',
+    'backend-alignment': 'backend-alignment',
     alignment_worker: 'backend-alignment',
   };
   const timingSource: TimingSource = timingSourceMap[bestCandidate.providerId] || 'unknown';
-  const isAuthenticTiming = syncType !== 'NONE' && winner.score.totalScore >= 0.65;
+
+  let timingProvenance: TimingProvenanceType = 'PLAIN';
+  if (syncQuality === 'WORD' && wordSyncValid) {
+    timingProvenance = 'AUTHENTIC_WORD';
+  } else if (syncQuality === 'DERIVED_WORD' && wordSyncValid) {
+    timingProvenance = 'DERIVED_WORD';
+  } else if (syncQuality === 'LINE') {
+    timingProvenance = 'LINE';
+  }
+
+  // Section 3 Critical Invariant:
+  // isAuthenticTiming is true ONLY for genuine provider word timing.
+  // DERIVED_WORD from Whisper is NEVER flagged as authentic provider timing.
+  const isAuthenticTiming = timingProvenance === 'AUTHENTIC_WORD' && winner.score.totalScore >= 0.70;
+
+  const matchConfidence = winner.score.totalScore;
+  const timingConfidence = bestCandidate.timingConfidence ?? (syncQuality === 'WORD' ? 0.95 : syncQuality === 'LINE' ? 0.85 : 0.0);
+  const acousticConfidence = bestCandidate.acousticConfidence ?? 0.0;
+  const overallConfidence = Number((matchConfidence * 0.40 + timingConfidence * 0.60).toFixed(3));
 
   const provenance: LyricsTimingProvenance = {
     syncType,
+    timingProvenance,
     timingSource,
     isAuthenticTiming,
-    confidence: winner.score.totalScore,
+    matchConfidence,
+    timingConfidence,
+    acousticConfidence,
+    overallConfidence,
+    confidence: overallConfidence,
   };
 
   const doc: LyricsDocument = {
@@ -343,10 +406,12 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
       album: identity.album,
       durationMs: identity.durationMs,
       version: identity.version,
+      recordingKey: identity.recordingKey,
+      canonicalTrackKey: identity.canonicalTrackKey,
     },
     source: {
       provider: bestCandidate.providerId,
-      confidence: winner.score.totalScore,
+      confidence: overallConfidence,
       providerTrackId: bestCandidate.providerTrackId,
       sourceReference: bestCandidate.sourceReference,
     },
@@ -356,20 +421,21 @@ async function executeResolution(identity: TrackIdentity): Promise<LyricsDocumen
     plainText,
     capabilities: {
       plain: Boolean(plainText),
-      lineSync: syncQuality === 'LINE' || syncQuality === 'WORD',
-      wordSync: syncQuality === 'WORD',
+      lineSync: syncQuality === 'LINE' || syncQuality === 'WORD' || syncQuality === 'DERIVED_WORD',
+      wordSync: syncQuality === 'WORD' || syncQuality === 'DERIVED_WORD',
       romanized: translitResult.hasRomanizedContent,
     },
-    confidence: winner.score.totalScore,
+    confidence: overallConfidence,
     cachedAtMs: Date.now(),
   };
 
-  // If we only have LINE-level sync, dispatch asynchronous word-level alignment generation
-  if (syncQuality === 'LINE' && lines.length > 0) {
-    triggerBackendAlignment(identity, lines);
+  // If we only have LINE-level sync, trigger asynchronous word alignment in background
+  if (syncQuality === 'LINE' && lines.length > 0 && bestCandidate.providerId !== 'backend-alignment') {
+    triggerBackendAlignment(identity, lines, streamUrl);
   }
 
-  // 9. Store in L1 Cache
+  // 7. Store in L1 Cache
+  lyricsL1Cache.set(identity.recordingKey, doc);
   lyricsL1Cache.set(identity.identityHash, doc);
   return doc;
 }
@@ -383,6 +449,8 @@ function createEmptyDocument(identity: TrackIdentity): LyricsDocument {
       album: identity.album,
       durationMs: identity.durationMs,
       version: identity.version,
+      recordingKey: identity.recordingKey,
+      canonicalTrackKey: identity.canonicalTrackKey,
     },
     source: {
       provider: 'fallback',
@@ -391,8 +459,13 @@ function createEmptyDocument(identity: TrackIdentity): LyricsDocument {
     syncQuality: 'NONE',
     provenance: {
       syncType: 'NONE',
+      timingProvenance: 'PLAIN',
       timingSource: 'unknown',
       isAuthenticTiming: false,
+      matchConfidence: 0.0,
+      timingConfidence: 0.0,
+      acousticConfidence: 0.0,
+      overallConfidence: 0.0,
       confidence: 0.0,
     },
     lines: [],

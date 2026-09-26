@@ -13,11 +13,12 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 from app.services.alignment.engine_base import AlignmentEngineBase
-from app.services.alignment.models import LyricsLine, LyricsWord
+from app.services.alignment.models import LyricsLine, LyricsWord, WordTimingType
 from app.services.alignment.normalizer import (
     tokenize_for_alignment,
     normalize_alignment_token,
     detect_script,
+    detect_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,194 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
     def __init__(self, model_size: str = "base"):
         self.model_size = model_size
 
+    def align_track(
+        self,
+        audio_pcm: np.ndarray,
+        lines: List[LyricsLine],
+        sample_rate: int = 16000,
+        language: Optional[str] = None,
+    ) -> Tuple[List[LyricsLine], bool, float]:
+        """
+        Two-stage alignment across the full track:
+        Stage A: Coarse full-track transcription and acoustic anchor extraction.
+        Stage B: Monotonic constrained dynamic sequence alignment to authoritative lyric lines.
+        Stage C: Word timestamp generation tagged as ACOUSTIC_ANCHOR, INTERPOLATED, or UNCERTAIN.
+        Stage D: Validation & anchor rate verification. Rejects fake precision if anchor rate < 60%.
+
+        Returns: (aligned_lines, is_valid_word_sync, anchor_rate)
+        """
+        if len(audio_pcm) == 0 or not lines:
+            return lines, False, 0.0
+
+        sample_text = " ".join(l.original for l in lines[:10] if not l.is_instrumental)
+        lang_code = detect_language(sample_text, language)
+
+        model = get_whisper_model(self.model_size)
+        if model is None:
+            # Fallback interpolation for all lines
+            fallback_lines: List[LyricsLine] = []
+            for line in lines:
+                if line.is_instrumental or not line.original.strip():
+                    fallback_lines.append(line.model_copy(update={"words": []}))
+                    continue
+                pairs = tokenize_for_alignment(line.original)
+                st = line.start_ms if line.start_ms is not None else 0
+                en = line.end_ms if line.end_ms is not None else st + 3000
+                words = self._interpolate_line(pairs, st, en, base_conf=0.75)
+                fallback_lines.append(line.model_copy(update={"words": words}))
+            return fallback_lines, False, 0.0
+
+        try:
+            # Stage A: Full-track coarse audio transcription with word-level timestamps
+            segments, _ = model.transcribe(
+                audio_pcm,
+                word_timestamps=True,
+                language=lang_code,
+                beam_size=1,
+                temperature=0.0,
+            )
+
+            all_recognized: List[Tuple[str, int, int, float]] = []
+            for seg in segments:
+                if seg.words:
+                    for w in seg.words:
+                        clean_w = normalize_alignment_token(w.word)
+                        if clean_w:
+                            start_ms = int(w.start * 1000)
+                            end_ms = int(w.end * 1000)
+                            all_recognized.append((clean_w, start_ms, end_ms, float(w.probability)))
+
+            # Stage B & C: Monotonic alignment against lines
+            aligned_lines: List[LyricsLine] = []
+            total_words = 0
+            anchor_words = 0
+            max_unanchored_span = 0
+
+            rec_cursor = 0
+            n_rec = len(all_recognized)
+
+            for line in lines:
+                if line.is_instrumental or not line.original.strip():
+                    aligned_lines.append(line.model_copy(update={"words": []}))
+                    continue
+
+                pairs = tokenize_for_alignment(line.original)
+                if not pairs:
+                    aligned_lines.append(line.model_copy(update={"words": []}))
+                    continue
+
+                line_start = line.start_ms if line.start_ms is not None else 0
+                line_end = line.end_ms if line.end_ms is not None else line_start + 3000
+
+                # Window search with expanded ±1500ms acoustic context
+                matched_line_words: List[Optional[Tuple[int, int, float]]] = [None] * len(pairs)
+                curr_span = 0
+
+                for p_idx, (_, exp_clean) in enumerate(pairs):
+                    best_rec_idx = -1
+                    best_prob = 0.0
+
+                    # Monotonically scan forward in recognized words within plausible temporal range
+                    scan_idx = rec_cursor
+                    while scan_idx < n_rec and all_recognized[scan_idx][1] < line_start - 2000:
+                        scan_idx += 1
+
+                    for cand_idx in range(scan_idx, min(n_rec, scan_idx + 8)):
+                        r_clean, r_st, r_en, r_prob = all_recognized[cand_idx]
+                        if r_st > line_end + 2500:
+                            break
+
+                        if exp_clean == r_clean or exp_clean in r_clean or r_clean in exp_clean:
+                            best_rec_idx = cand_idx
+                            best_prob = r_prob
+                            break
+
+                    if best_rec_idx != -1 and best_prob >= 0.35:
+                        _, r_st, r_en, _ = all_recognized[best_rec_idx]
+                        clamped_st = max(line_start - 150, min(line_end, r_st))
+                        clamped_en = max(clamped_st + 40, min(line_end + 150, r_en))
+                        matched_line_words[p_idx] = (clamped_st, clamped_en, max(0.60, min(1.0, best_prob)))
+                        rec_cursor = best_rec_idx + 1
+                        curr_span = 0
+                    else:
+                        curr_span += 1
+                        if curr_span > max_unanchored_span:
+                            max_unanchored_span = curr_span
+
+                # Build line words with timing types
+                line_words: List[LyricsWord] = []
+                for i, (disp_tok, _) in enumerate(pairs):
+                    total_words += 1
+                    if matched_line_words[i] is not None:
+                        st, en, conf = matched_line_words[i]  # type: ignore
+                        line_words.append(
+                            LyricsWord(
+                                text=disp_tok,
+                                start_ms=st,
+                                end_ms=en,
+                                confidence=conf,
+                                timing_type=WordTimingType.ACOUSTIC_ANCHOR,
+                            )
+                        )
+                        anchor_words += 1
+                    else:
+                        # Find previous anchor
+                        prev_end = line_start
+                        for p in range(i - 1, -1, -1):
+                            if matched_line_words[p] is not None:
+                                prev_end = matched_line_words[p][1]  # type: ignore
+                                break
+
+                        # Find next anchor
+                        next_start = line_end
+                        for n in range(i + 1, len(pairs)):
+                            if matched_line_words[n] is not None:
+                                next_start = matched_line_words[n][0]  # type: ignore
+                                break
+
+                        span = max(50, next_start - prev_end)
+                        gap_start_idx = i
+                        while gap_start_idx > 0 and matched_line_words[gap_start_idx - 1] is None:
+                            gap_start_idx -= 1
+                        gap_end_idx = i
+                        while gap_end_idx < len(pairs) - 1 and matched_line_words[gap_end_idx + 1] is None:
+                            gap_end_idx += 1
+
+                        gap_len = gap_end_idx - gap_start_idx + 1
+                        pos_in_gap = i - gap_start_idx
+                        step = span / gap_len
+                        st = int(prev_end + (pos_in_gap * step))
+                        en = int(st + step)
+
+                        t_type = (
+                            WordTimingType.INTERPOLATED
+                            if gap_len <= 3 and span <= 4000
+                            else WordTimingType.UNCERTAIN
+                        )
+                        conf = 0.70 if t_type == WordTimingType.INTERPOLATED else 0.45
+
+                        line_words.append(
+                            LyricsWord(
+                                text=disp_tok,
+                                start_ms=st,
+                                end_ms=max(st + 40, en),
+                                confidence=conf,
+                                timing_type=t_type,
+                            )
+                        )
+
+                aligned_lines.append(line.model_copy(update={"words": line_words}))
+
+            anchor_rate = anchor_words / max(1, total_words)
+            # Rejection rule: anchor_rate < 0.60 or excessive unanchored span
+            is_valid = anchor_rate >= 0.60 and max_unanchored_span <= 6
+
+            return aligned_lines, is_valid, round(anchor_rate, 4)
+
+        except Exception as e:
+            logger.warning("Two-stage Whisper alignment failed: %s", e)
+            return lines, False, 0.0
+
     def _sync_align_line(
         self,
         audio_window_pcm: np.ndarray,
@@ -53,36 +242,26 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
         sample_rate: int = 16000,
         language: Optional[str] = None,
     ) -> List[LyricsWord]:
-        """Synchronous alignment execution run inside a worker thread."""
+        """Synchronous single-line window alignment fallback."""
         pairs = tokenize_for_alignment(line.original)
         if not pairs:
             return []
 
         line_start = line.start_ms if line.start_ms is not None else window_start_ms
         line_end = line.end_ms if line.end_ms is not None else line_start + 3000
-        line_dur_ms = max(200, line_end - line_start)
 
-        # Detect language hint if not provided
-        if not language:
-            script = detect_script(line.original)
-            if script == "devanagari":
-                language = "hi"
-            elif script == "gurmukhi":
-                language = "pa"
-            else:
-                language = "en"
+        lang_code = detect_language(line.original, language)
 
         model = get_whisper_model(self.model_size)
         if model is None or len(audio_window_pcm) == 0:
             return self._interpolate_line(pairs, line_start, line_end, base_conf=0.82)
 
         try:
-            # faster-whisper requires float32 numpy array
             segments, _ = model.transcribe(
                 audio_window_pcm,
                 word_timestamps=True,
                 initial_prompt=line.original,
-                language=language,
+                language=lang_code,
                 beam_size=1,
                 temperature=0.0,
             )
@@ -98,7 +277,6 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
             if not recognized_words:
                 return self._interpolate_line(pairs, line_start, line_end, base_conf=0.80)
 
-            # Monotonic matching between expected tokens and recognized words
             return self._match_tokens_to_words(
                 pairs=pairs,
                 recognized=recognized_words,
@@ -134,7 +312,6 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
         sample_rate: int = 16000,
         language: Optional[str] = None,
     ) -> List[LyricsWord]:
-        """Execute alignment inside a thread pool to avoid blocking the event loop."""
         return await asyncio.to_thread(
             self._sync_align_line,
             audio_window_pcm,
@@ -152,14 +329,8 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
         line_start_ms: int,
         line_end_ms: int,
     ) -> List[LyricsWord]:
-        """
-        Monotonically match authoritative display tokens with recognized timestamps.
-        Any missing tokens are smoothly interpolated between acoustic anchor points.
-        """
         n_expected = len(pairs)
         n_rec = len(recognized)
-
-        # Matched array: list of Optional[Tuple[start_ms, end_ms, confidence]]
         matched: List[Optional[Tuple[int, int, float]]] = [None] * n_expected
 
         rec_idx = 0
@@ -167,7 +338,6 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
             best_match_idx = -1
             best_score = 0.0
 
-            # Look forward up to 3 tokens in recognized list
             for check_idx in range(rec_idx, min(n_rec, rec_idx + 4)):
                 rec_clean, r_start, r_end, r_prob = recognized[check_idx]
                 if exp_clean == rec_clean or exp_clean in rec_clean or rec_clean in exp_clean:
@@ -180,28 +350,32 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
                 abs_start = window_start_ms + int(r_start * 1000)
                 abs_end = window_start_ms + int(r_end * 1000)
 
-                # Clamp to line boundary tolerance
                 abs_start = max(line_start_ms - 150, min(line_end_ms, abs_start))
                 abs_end = max(abs_start + 40, min(line_end_ms + 150, abs_end))
 
                 matched[exp_idx] = (abs_start, abs_end, max(0.65, min(1.0, float(best_score))))
                 rec_idx = best_match_idx + 1
 
-        # Interpolate any unanchored tokens
         final_words: List[LyricsWord] = []
         for i, (disp_tok, _) in enumerate(pairs):
             if matched[i] is not None:
                 st, en, conf = matched[i]  # type: ignore
-                final_words.append(LyricsWord(text=disp_tok, start_ms=st, end_ms=en, confidence=conf))
+                final_words.append(
+                    LyricsWord(
+                        text=disp_tok,
+                        start_ms=st,
+                        end_ms=en,
+                        confidence=conf,
+                        timing_type=WordTimingType.ACOUSTIC_ANCHOR,
+                    )
+                )
             else:
-                # Find previous anchor
                 prev_end = line_start_ms
                 for p in range(i - 1, -1, -1):
                     if matched[p] is not None:
                         prev_end = matched[p][1]  # type: ignore
                         break
 
-                # Find next anchor
                 next_start = line_end_ms
                 for n in range(i + 1, n_expected):
                     if matched[n] is not None:
@@ -209,7 +383,6 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
                         break
 
                 span = max(50, next_start - prev_end)
-                # Count unanchored gap length
                 gap_start_idx = i
                 while gap_start_idx > 0 and matched[gap_start_idx - 1] is None:
                     gap_start_idx -= 1
@@ -219,11 +392,26 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
 
                 gap_len = gap_end_idx - gap_start_idx + 1
                 pos_in_gap = i - gap_start_idx
-
                 step = span / gap_len
                 st = int(prev_end + (pos_in_gap * step))
                 en = int(st + step)
-                final_words.append(LyricsWord(text=disp_tok, start_ms=st, end_ms=max(st + 40, en), confidence=0.75))
+
+                t_type = (
+                    WordTimingType.INTERPOLATED
+                    if gap_len <= 3 and span <= 3500
+                    else WordTimingType.UNCERTAIN
+                )
+                conf = 0.72 if t_type == WordTimingType.INTERPOLATED else 0.45
+
+                final_words.append(
+                    LyricsWord(
+                        text=disp_tok,
+                        start_ms=st,
+                        end_ms=max(st + 40, en),
+                        confidence=conf,
+                        timing_type=t_type,
+                    )
+                )
 
         return final_words
 
@@ -234,7 +422,6 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
         line_end_ms: int,
         base_conf: float = 0.80,
     ) -> List[LyricsWord]:
-        """Fallback character-weighted acoustic interpolation across line boundaries."""
         total_chars = sum(len(clean) for _, clean in pairs)
         if total_chars == 0:
             total_chars = len(pairs)
@@ -250,7 +437,15 @@ class WhisperAlignmentEngine(AlignmentEngineBase):
                 weight = max(1, len(clean)) / total_chars
                 w_dur = max(50, int(duration * weight))
                 w_end = min(line_end_ms, curr + w_dur)
-            words.append(LyricsWord(text=disp, start_ms=curr, end_ms=max(curr + 40, w_end), confidence=base_conf))
+            words.append(
+                LyricsWord(
+                    text=disp,
+                    start_ms=curr,
+                    end_ms=max(curr + 40, w_end),
+                    confidence=base_conf,
+                    timing_type=WordTimingType.INTERPOLATED,
+                )
+            )
             curr = w_end
 
         return words

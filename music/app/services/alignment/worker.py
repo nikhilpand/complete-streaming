@@ -44,19 +44,30 @@ class AlignmentWorkerManager:
         artist: str,
         duration_ms: Optional[int],
         lines: List[LyricsLine],
+        canonical_track_key: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_track_id: Optional[str] = None,
         stream_url: Optional[str] = None,
         provider_instance = None,
     ) -> AlignmentJob:
         """
         Check for existing cache/job and enqueue background alignment task.
         """
+        c_key = canonical_track_key or track_id
+
         # 1. Check if high-quality word sync is already stored
-        existing_doc = await storage.get_lyrics_by_hash(identity_hash)
+        existing_doc = await storage.get_lyrics_by_canonical_key(c_key, identity_hash)
+        if not existing_doc:
+            existing_doc = await storage.get_lyrics_by_hash(identity_hash)
+
         if existing_doc and existing_doc.sync_type in (SyncType.WORD, SyncType.DERIVED_WORD) and existing_doc.confidence >= 0.78:
             job_id = f"job_hit_{uuid.uuid4().hex[:12]}"
             return AlignmentJob(
                 job_id=job_id,
                 track_id=track_id,
+                canonical_track_key=c_key,
+                provider=provider,
+                provider_track_id=provider_track_id,
                 identity_hash=identity_hash,
                 status=JobStatus.COMPLETED,
                 progress=1.0,
@@ -70,13 +81,23 @@ class AlignmentWorkerManager:
 
         # 3. Create new job entry
         job_id = f"job_{uuid.uuid4().hex[:12]}"
-        job = await storage.create_job(job_id=job_id, track_id=track_id, identity_hash=identity_hash)
+        job = await storage.create_job(
+            job_id=job_id,
+            track_id=track_id,
+            canonical_track_key=c_key,
+            provider=provider,
+            provider_track_id=provider_track_id,
+            identity_hash=identity_hash,
+        )
 
         # 4. Spawn background task
         task = asyncio.create_task(
             self._execute_alignment_pipeline(
                 job_id=job_id,
                 track_id=track_id,
+                canonical_track_key=c_key,
+                provider=provider,
+                provider_track_id=provider_track_id,
                 identity_hash=identity_hash,
                 title=title,
                 artist=artist,
@@ -98,6 +119,9 @@ class AlignmentWorkerManager:
         self,
         job_id: str,
         track_id: str,
+        canonical_track_key: str,
+        provider: Optional[str],
+        provider_track_id: Optional[str],
         identity_hash: str,
         title: str,
         artist: str,
@@ -110,15 +134,23 @@ class AlignmentWorkerManager:
             try:
                 await storage.update_job(job_id, JobStatus.PROCESSING, progress=0.05)
 
-                # 1. Resolve stream URL if not directly passed
+                # 1. Resolve stream URL if not directly passed (Audio Stream Parity)
                 resolved_url = stream_url
                 if not resolved_url and provider_instance:
-                    song = await provider_instance.get_song(track_id)
-                    media = await provider_instance.resolve_media(song)
-                    if media and media.streams:
-                        # Pick highest bitrate stream
-                        best_stream = max(media.streams, key=lambda s: s.bitrate_kbps or 0)
-                        resolved_url = best_stream.url
+                    try:
+                        if canonical_track_key.startswith("youtube:") and hasattr(provider_instance, "ytmusic") and provider_instance.ytmusic:
+                            yt_id = provider_track_id or canonical_track_key.split("youtube:", 1)[1]
+                            song = await provider_instance.ytmusic.get_song(yt_id)
+                            media = await provider_instance.ytmusic.resolve_media(song)
+                        else:
+                            song = await provider_instance.get_song(track_id)
+                            media = await provider_instance.resolve_media(song)
+
+                        if media and media.streams:
+                            best_stream = max(media.streams, key=lambda s: s.bitrate_kbps or 0)
+                            resolved_url = best_stream.url
+                    except Exception as res_err:
+                        logger.warning("Stream resolution error for %s: %s", canonical_track_key, res_err)
 
                 if not resolved_url:
                     await storage.update_job(
@@ -142,7 +174,7 @@ class AlignmentWorkerManager:
                     )
                     return
 
-                # 3. Line-constrained alignment loop
+                # 3. Two-Stage Monotonic Alignment
                 total_lines = len(lines)
                 if total_lines == 0:
                     await storage.update_job(
@@ -153,48 +185,41 @@ class AlignmentWorkerManager:
                     )
                     return
 
-                # Track-level language detection hint
-                sample_text = " ".join(l.original for l in lines[:5])
-                script = detect_script(sample_text)
-                lang_code = "hi" if script == "devanagari" else "pa" if script == "gurmukhi" else "en"
+                sample_text = " ".join(l.original for l in lines[:10] if not l.is_instrumental)
+                from app.services.alignment.normalizer import detect_language
+                lang_code = detect_language(sample_text)
 
-                aligned_lines: List[LyricsLine] = []
+                await storage.update_job(job_id, JobStatus.PROCESSING, progress=0.40)
 
-                for idx, line in enumerate(lines):
-                    # Progress from 0.25 to 0.85
-                    curr_progress = 0.25 + (0.60 * (idx / total_lines))
-                    await storage.update_job(job_id, JobStatus.PROCESSING, progress=round(curr_progress, 2))
+                # Execute two-stage alignment in thread pool
+                aligned_lines, is_valid_stage, anchor_rate = await asyncio.to_thread(
+                    self.engine.align_track,
+                    audio_pcm,
+                    lines,
+                    16000,
+                    lang_code,
+                )
 
-                    if line.is_instrumental or not line.original.strip():
-                        aligned_lines.append(line.model_copy(update={"words": []}))
-                        continue
+                await storage.update_job(job_id, JobStatus.PROCESSING, progress=0.85)
 
-                    # Fallback boundary if line timestamps missing
-                    st = line.start_ms if line.start_ms is not None else 0
-                    en = line.end_ms if line.end_ms is not None else st + 3500
-
-                    window_pcm, win_start = AudioProvider.slice_window(audio_pcm, st, en, pad_ms=250)
-
-                    # Align words in window
-                    words = await self.engine.align_line_async(
-                        audio_window_pcm=window_pcm,
-                        window_start_ms=win_start,
-                        line=line,
-                        language=lang_code,
-                    )
-
-                    aligned_lines.append(line.model_copy(update={"words": words}))
-
-                # 4. Quality Validation
-                await storage.update_job(job_id, JobStatus.PROCESSING, progress=0.90)
-                is_valid, aggregate_conf, errors = AlignmentValidator.validate_document(aligned_lines)
+                if is_valid_stage:
+                    # 4. Quality Validation
+                    is_valid, aggregate_conf, errors = AlignmentValidator.validate_document(aligned_lines)
+                else:
+                    is_valid = False
+                    aggregate_conf = 0.0
+                    errors = [f"Anchor rate ({anchor_rate:.1%}) below 60% requirement or gap too wide"]
 
                 if is_valid:
                     # Construct and save DERIVED_WORD document
                     doc = LyricsDocument(
                         id=f"doc_{uuid.uuid4().hex[:12]}",
                         track_id=track_id,
+                        canonical_track_key=canonical_track_key,
+                        provider=provider,
+                        provider_track_id=provider_track_id,
                         identity_hash=identity_hash,
+                        engine_version="v4",
                         title=title,
                         artist=artist,
                         duration_ms=duration_ms,
@@ -202,8 +227,12 @@ class AlignmentWorkerManager:
                         lines=aligned_lines,
                         plain_text="\n".join(l.original for l in lines),
                         confidence=aggregate_conf,
+                        match_confidence=1.0,
+                        timing_confidence=aggregate_conf,
+                        line_source_confidence=1.0,
+                        alignment_confidence=anchor_rate,
                         source_provider="alignment_worker",
-                        engine_used="whisper_line_constrained",
+                        engine_used="whisper_two_stage",
                         language=lang_code,
                     )
                     await storage.save_lyrics(doc)
@@ -213,15 +242,19 @@ class AlignmentWorkerManager:
                         progress=1.0,
                         sync_type=SyncType.DERIVED_WORD,
                     )
-                    logger.info("Successfully generated DERIVED_WORD alignment for '%s' (conf: %.2f)", title, aggregate_conf)
+                    logger.info("Successfully generated DERIVED_WORD alignment for '%s' (conf: %.2f, anchor_rate: %.2f)", title, aggregate_conf, anchor_rate)
                 else:
                     err_summary = "; ".join(errors[:3])
-                    logger.warning("Alignment rejected for '%s' (conf: %.2f): %s", title, aggregate_conf, err_summary)
-                    # Safe fallback to LINE sync
+                    logger.warning("Alignment rejected for '%s': %s", title, err_summary)
+                    # Safe fallback to LINE sync with explicit calibrated confidences (Point 16)
                     fallback_doc = LyricsDocument(
                         id=f"doc_{uuid.uuid4().hex[:12]}",
                         track_id=track_id,
+                        canonical_track_key=canonical_track_key,
+                        provider=provider,
+                        provider_track_id=provider_track_id,
                         identity_hash=identity_hash,
+                        engine_version="v4",
                         title=title,
                         artist=artist,
                         duration_ms=duration_ms,
@@ -229,6 +262,10 @@ class AlignmentWorkerManager:
                         lines=[l.model_copy(update={"words": []}) for l in lines],
                         plain_text="\n".join(l.original for l in lines),
                         confidence=0.85,
+                        match_confidence=1.0,
+                        timing_confidence=0.85,
+                        line_source_confidence=0.85,
+                        alignment_confidence=0.0,  # Explicitly 0.0 for failed alignment
                         source_provider="alignment_fallback",
                         engine_used="line_fallback",
                         language=lang_code,

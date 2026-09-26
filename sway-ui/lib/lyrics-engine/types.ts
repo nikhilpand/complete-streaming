@@ -18,21 +18,32 @@ export type TrackVersion =
   | 'unspecified';
 
 export interface TrackIdentity {
-  title: string;
-  artists: string[];
-  album?: string;
-  durationMs: number;
+  provider: string; // e.g. "youtube", "saavn", "lrclib", "unknown"
+  providerId?: string; // backward compat alias
+  providerTrackId?: string;
   videoId?: string;
   isrc?: string;
-  providerId?: string;
-  providerTrackId?: string;
+  canonicalTrackKey: string; // e.g. "youtube:VIDEO_ID" or "saavn:PID"
+  title: string;
+  normalizedTitle: string;
+  artists: string[];
+  normalizedArtists: string[];
+  album?: string;
+  normalizedAlbum?: string;
+  durationMs: number;
+  exactDurationBucket: number; // 1-second exact bucket: Math.floor(durationMs / 1000)
   version: TrackVersion;
-  identityHash: string;
+  recordingKey: string; // SHA-256 fingerprint
+  identityHash: string; // alias for recordingKey
 }
 
 export type SyncQuality = 'NONE' | 'LINE' | 'WORD' | 'DERIVED_WORD';
 
 export type LyricsSyncType = 'NONE' | 'LINE' | 'WORD' | 'SYLLABLE';
+
+export type TimingProvenanceType = 'AUTHENTIC_WORD' | 'DERIVED_WORD' | 'LINE' | 'PLAIN';
+
+export type WordTimingType = 'ACOUSTIC_ANCHOR' | 'INTERPOLATED' | 'UNCERTAIN';
 
 export type TimingSource =
   | 'bini'
@@ -46,9 +57,14 @@ export type TimingSource =
 
 export interface LyricsTimingProvenance {
   syncType: LyricsSyncType;
+  timingProvenance: TimingProvenanceType;
   timingSource: TimingSource;
   isAuthenticTiming: boolean;
-  confidence: number;
+  matchConfidence: number;
+  timingConfidence: number;
+  acousticConfidence: number;
+  overallConfidence: number;
+  confidence: number; // backward compatibility alias for overallConfidence
 }
 
 export interface LyricsWord {
@@ -56,6 +72,8 @@ export interface LyricsWord {
   startMs: number;
   endMs: number;
   romanized?: string;
+  timingType?: WordTimingType;
+  confidence?: number;
 }
 
 export interface LyricsLine {
@@ -90,6 +108,8 @@ export interface LyricsDocument {
     album?: string;
     durationMs: number;
     version: TrackVersion;
+    recordingKey?: string;
+    canonicalTrackKey?: string;
   };
   source: LyricsSource;
   syncQuality: SyncQuality;
@@ -116,6 +136,8 @@ export interface RichSyncLine {
 export interface LyricsCandidate {
   providerId: 'lrclib' | 'ytmusic' | 'musixmatch' | 'jiosaavn' | 'binilyrics' | 'unison' | string;
   providerTrackId?: string;
+  videoId?: string;
+  isrc?: string;
   title?: string;
   artists: string[];
   album?: string;
@@ -127,16 +149,20 @@ export interface LyricsCandidate {
   sourceReference?: string;
   providerConfidence?: number;
   fetchedAtMs: number;
+  timingProvenance?: TimingProvenanceType;
+  timingConfidence?: number;
+  acousticConfidence?: number;
 }
 
 export interface MatchScoreBreakdown {
-  titleScore: number;       // weight: 0.30
-  artistScore: number;      // weight: 0.30
-  durationScore: number;    // weight: 0.15
-  versionScore: number;     // weight: 0.10
-  providerBonus: number;    // weight: 0.10
-  contentSanityScore: number;// weight: 0.05
-  totalScore: number;       // 0.00 to 1.00
+  recordingMatchScore: number; // weight: 0.20 (exact ISRC, providerTrackId, exact duration match)
+  titleScore: number;          // weight: 0.25 (title similarity)
+  artistScore: number;         // weight: 0.25 (artist similarity)
+  durationScore: number;       // weight: 0.15 (duration similarity)
+  versionScore: number;        // weight: 0.10 (studio vs live vs remix vs instrumental)
+  providerBonus: number;       // weight: 0.02 (secondary tie-breaker only)
+  contentSanityScore: number;  // weight: 0.03 (structural content sanity)
+  totalScore: number;          // 0.00 to 1.00
   versionPenaltyApplied: boolean;
   rejectionReason?: string;
 }

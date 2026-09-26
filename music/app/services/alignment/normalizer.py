@@ -19,6 +19,30 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _CLEAN_TOKEN_RE = re.compile(r"[^\w\s\u0900-\u097F\u0A00-\u0A7F']+")
 
 
+# Common Romanized Hindi/Urdu and Punjabi phonetic keywords (excluding English stopword collisions)
+_ROMAN_INDIC_KEYWORDS = {
+    # Hindi/Urdu high-frequency tokens
+    "tum", "hum", "main", "mera", "meri", "mere", "tera", "teri", "tere",
+    "kya", "kyun", "kyu", "hai", "hain", "tha", "thi",
+    "karna", "karte", "karti", "dil", "ishq", "pyar", "pyaar", "mohabbat",
+    "chahiye", "zindagi", "jaan", "saath", "nahi", "nahin", "naa",
+    "hota", "hoti", "hote", "jaana", "aana", "rabba", "khuda",
+    "chaleya", "kesariya", "ankhiyan", "aankhon", "raatein", "jeena",
+    "suno", "dekho", "kuch", "apna", "apni", "apne", "tujhe", "mujhe",
+    "raha", "rahi", "rahe", "hona", "hua", "hui", "hue", "duniya",
+    # Punjabi high-frequency tokens
+    "ve", "vich", "nach", "soch", "munda", "kudi",
+    "soniye", "heer", "ranjha", "jatt", "dholna", "tenu", "menu",
+    "assi", "tussi", "haye", "channa"
+}
+
+_PUNJABI_SPECIFIC_KEYWORDS = {
+    "ve", "vich", "nach", "munda", "kudi",
+    "soniye", "heer", "ranjha", "jatt", "dholna", "tenu", "menu",
+    "assi", "tussi", "channa"
+}
+
+
 def is_devanagari(text: str) -> bool:
     """Check if text contains Devanagari characters (Hindi, Marathi, etc.)."""
     return any("\u0900" <= ch <= "\u097F" for ch in text)
@@ -36,6 +60,79 @@ def detect_script(text: str) -> str:
     if is_gurmukhi(text):
         return "gurmukhi"
     return "latin"
+
+
+def is_roman_indic(text: str, threshold: float = 0.18) -> Tuple[bool, str]:
+    """
+    Detect whether Latin script text is Romanized Hindi or Punjabi (Hinglish/Pinglish).
+    Requires at least 2 indicative keyword matches to eliminate single-word noise.
+    Returns (is_indic, lang_code).
+    """
+    words = [re.sub(r"[^\w]", "", w.lower()) for w in text.split()]
+    clean_words = [w for w in words if w and len(w) >= 2]
+    if not clean_words:
+        return False, "en"
+
+    indic_matches = sum(1 for w in clean_words if w in _ROMAN_INDIC_KEYWORDS)
+    ratio = indic_matches / len(clean_words)
+
+    if indic_matches >= 2 and ratio >= threshold:
+        punjabi_matches = sum(1 for w in clean_words if w in _PUNJABI_SPECIFIC_KEYWORDS)
+        if punjabi_matches >= 2 or (punjabi_matches > 0 and punjabi_matches >= indic_matches // 2):
+            return True, "pa"
+        return True, "hi"
+
+    return False, "en"
+
+
+def detect_language(text: str, metadata_language: Optional[str] = None) -> str:
+    """
+    Determine the optimal language code for Whisper transcription/alignment.
+    Priority:
+    1. Metadata language if explicitly provided and recognizable
+    2. Native Devanagari -> 'hi'
+    3. Native Gurmukhi -> 'pa'
+    4. Latin script with Romanized Hindi/Punjabi heuristics -> 'hi' or 'pa'
+    5. Fallback -> 'en'
+    """
+    if metadata_language:
+        meta_norm = metadata_language.strip().lower()
+        if meta_norm in ("hi", "hindi", "hin"):
+            return "hi"
+        if meta_norm in ("pa", "punjabi", "pan"):
+            return "pa"
+        if meta_norm in ("en", "english", "eng"):
+            # Still check if the text is predominantly Devanagari
+            if is_devanagari(text):
+                return "hi"
+            if is_gurmukhi(text):
+                return "pa"
+            # If metadata says English but text is heavily Roman Hindi, honor Roman Hindi
+            is_indic, indic_lang = is_roman_indic(text, threshold=0.25)
+            return indic_lang if is_indic else "en"
+        if meta_norm in ("ta", "tamil"):
+            return "ta"
+        if meta_norm in ("te", "telugu"):
+            return "te"
+        if meta_norm in ("bn", "bengali"):
+            return "bn"
+        if meta_norm in ("mr", "marathi"):
+            return "mr"
+        if meta_norm in ("gu", "gujarati"):
+            return "gu"
+
+    script = detect_script(text)
+    if script == "devanagari":
+        return "hi"
+    if script == "gurmukhi":
+        return "pa"
+
+    # Latin script: analyze for Hinglish / Roman Indic
+    is_indic, indic_lang = is_roman_indic(text)
+    if is_indic:
+        return indic_lang
+
+    return "en"
 
 
 def normalize_alignment_token(token: str) -> str:

@@ -1,6 +1,9 @@
 /**
  * matcher.ts
- * Deterministic Match Scoring & Acceptance Engine (Section 9 & 10)
+ * Deterministic Recording Match & Multi-Candidate Scoring Engine (Section 9 & 10)
+ *
+ * Emphasizes exact recording match, text agreement, sync precision, and timing consistency.
+ * Provider bonus is reduced to a secondary tie-breaker (weight 0.02).
  */
 
 import { TrackIdentity, LyricsCandidate, MatchScoreBreakdown } from './types';
@@ -18,7 +21,7 @@ function cleanStringForComparison(str: string): string {
 /**
  * Token-aware similarity between two strings (0.0 to 1.0)
  */
-function tokenSimilarity(a: string, b: string): number {
+export function tokenSimilarity(a: string, b: string): number {
   const cleanA = cleanStringForComparison(a);
   const cleanB = cleanStringForComparison(b);
   if (!cleanA && !cleanB) return 1.0;
@@ -36,7 +39,7 @@ function tokenSimilarity(a: string, b: string): number {
   const union = new Set([...tokensA, ...tokensB]).size;
   const jaccard = union > 0 ? intersection / union : 0;
 
-  // Substring bonus (e.g. "Kesariya" is contained in "Kesariya From Brahmastra")
+  // Substring bonus (e.g. "Kesariya" contained in "Kesariya From Brahmastra")
   if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) {
     return Math.max(jaccard, 0.80);
   }
@@ -47,12 +50,12 @@ function tokenSimilarity(a: string, b: string): number {
 /**
  * Calculates artist similarity across artist arrays
  */
-function artistSimilarity(targetArtists: string[], candidateArtists: string[]): number {
+export function artistSimilarity(targetArtists: string[], candidateArtists: string[]): number {
   if (targetArtists.length === 0 && candidateArtists.length === 0) return 0.7;
   if (targetArtists.length === 0 || candidateArtists.length === 0) return 0.3;
 
-  const primaryTarget = targetArtists[0].toLowerCase();
-  const primaryCand = candidateArtists[0]?.toLowerCase() || '';
+  const primaryTarget = cleanStringForComparison(targetArtists[0] || '');
+  const primaryCand = cleanStringForComparison(candidateArtists[0] || '');
 
   // Exact primary artist match
   if (primaryTarget && primaryCand && (primaryTarget === primaryCand || primaryTarget.includes(primaryCand) || primaryCand.includes(primaryTarget))) {
@@ -79,9 +82,8 @@ function artistSimilarity(targetArtists: string[], candidateArtists: string[]): 
  * <= 10s -> 0.30
  * > 10s  -> 0.00
  */
-function calculateDurationScore(targetMs: number, candidateMs?: number): { score: number; deltaSec: number } {
+export function calculateDurationScore(targetMs: number, candidateMs?: number): { score: number; deltaSec: number } {
   if (!targetMs || !candidateMs || targetMs <= 0 || candidateMs <= 0) {
-    // If duration not known by candidate, assign neutral 0.5
     return { score: 0.5, deltaSec: -1 };
   }
 
@@ -94,33 +96,77 @@ function calculateDurationScore(targetMs: number, candidateMs?: number): { score
 }
 
 /**
- * Scores a candidate against the canonical TrackIdentity using the 6-factor model
+ * Evaluates exact recording identity matches (ISRC, exact IDs, exact duration match).
+ */
+export function calculateRecordingMatchScore(target: TrackIdentity, candidate: LyricsCandidate): number {
+  // 1. Exact ISRC match is definitive recording identity
+  if (target.isrc && candidate.isrc && target.isrc.toUpperCase() === candidate.isrc.toUpperCase()) {
+    return 1.0;
+  }
+
+  // 2. Exact Video ID match
+  if (target.videoId && candidate.videoId && target.videoId === candidate.videoId) {
+    return 1.0;
+  }
+
+  // 3. Exact Provider Track ID match from the same provider
+  if (
+    target.providerTrackId &&
+    candidate.providerTrackId &&
+    target.providerTrackId === candidate.providerTrackId &&
+    target.provider === candidate.providerId
+  ) {
+    return 1.0;
+  }
+
+  // 4. Exact duration alignment (< 1s) with strong metadata agreement
+  if (target.durationMs > 0 && candidate.durationMs && candidate.durationMs > 0) {
+    const deltaSec = Math.abs(target.durationMs - candidate.durationMs) / 1000;
+    if (deltaSec <= 0.75) {
+      return 0.90;
+    } else if (deltaSec <= 1.5) {
+      return 0.75;
+    }
+  }
+
+  return 0.50;
+}
+
+/**
+ * Scores a candidate against the canonical TrackIdentity using evidence-based ranking:
+ * - Exact recording match: 20%
+ * - Title Agreement: 25%
+ * - Artist Agreement: 25%
+ * - Duration Distance: 15%
+ * - Version Consistency: 10%
+ * - Provider Bonus (tie-breaker): 2%
+ * - Content Sanity: 3%
  */
 export function scoreLyricsCandidate(
   target: TrackIdentity,
   candidate: LyricsCandidate,
   isContentValid: boolean
 ): MatchScoreBreakdown {
-  // 1. Title Similarity (30%)
+  // 1. Recording Match (20%)
+  const recordingMatchScore = calculateRecordingMatchScore(target, candidate);
+
+  // 2. Title Similarity (25%)
   const candTitle = candidate.title || '';
   const titleScore = tokenSimilarity(target.title, candTitle);
 
-  // 2. Artist Similarity (30%)
+  // 3. Artist Similarity (25%)
   const artistScore = artistSimilarity(target.artists, candidate.artists);
 
-  // 3. Duration Score (15%)
+  // 4. Duration Score (15%)
   const { score: durationScore, deltaSec } = calculateDurationScore(target.durationMs, candidate.durationMs);
 
-  // 4. Version & Album Consistency (10%)
+  // 5. Version & Album Consistency (10%)
   const candVersion = detectTrackVersion(candTitle, candidate.album || '');
   let versionScore = 1.0;
   let versionPenaltyApplied = false;
   let rejectionReason: string | undefined;
 
-  // Strict version collisions (Section 9)
-  // original ↔ live -> reject
-  // original ↔ remix -> reject
-  // song ↔ instrumental -> reject
+  // Strict version collisions
   if (target.version === 'original' && candVersion === 'live') {
     versionPenaltyApplied = true;
     versionScore = 0.0;
@@ -143,26 +189,26 @@ export function scoreLyricsCandidate(
     rejectionReason = 'Version mismatch: target is vocal track, candidate is instrumental';
   }
 
-  // 5. Provider Identity Bonus (10%)
-  let providerBonus = 0.7; // baseline
-  if (target.providerId && candidate.providerId === target.providerId) {
-    providerBonus = 1.0; // Same provider origin trust bonus
+  // 6. Provider Bonus (2% tie-breaker only)
+  let providerBonus = 0.5;
+  if (target.provider && candidate.providerId === target.provider) {
+    providerBonus = 1.0;
   } else if (target.providerTrackId && candidate.providerTrackId === target.providerTrackId) {
     providerBonus = 1.0;
   }
 
-  // 6. Content Sanity (5%)
+  // 7. Content Sanity (3%)
   const contentSanityScore = isContentValid ? 1.0 : 0.0;
 
-  // Calculate weighted total score:
-  // Title (30%) + Artist (30%) + Duration (15%) + Version (10%) + Provider (10%) + Sanity (5%)
+  // Composite calculation
   let totalScore =
-    titleScore * 0.30 +
-    artistScore * 0.30 +
+    recordingMatchScore * 0.20 +
+    titleScore * 0.25 +
+    artistScore * 0.25 +
     durationScore * 0.15 +
     versionScore * 0.10 +
-    providerBonus * 0.10 +
-    contentSanityScore * 0.05;
+    providerBonus * 0.02 +
+    contentSanityScore * 0.03;
 
   // Hard penalty: If delta > 10s and title or artist is mediocre, heavily downgrade
   if (deltaSec > 10 && (titleScore < 0.9 || artistScore < 0.9)) {
@@ -193,7 +239,7 @@ export function scoreLyricsCandidate(
     }
   }
 
-  // If severe version collision, cap score at 0.50 so it never auto-accepts
+  // If severe version collision, cap score at 0.49 so it never auto-accepts
   if (versionPenaltyApplied && versionScore === 0.0) {
     totalScore = Math.min(totalScore, 0.49);
   }
@@ -205,6 +251,7 @@ export function scoreLyricsCandidate(
   }
 
   return {
+    recordingMatchScore: Number(recordingMatchScore.toFixed(3)),
     titleScore: Number(titleScore.toFixed(3)),
     artistScore: Number(artistScore.toFixed(3)),
     durationScore: Number(durationScore.toFixed(3)),
@@ -220,8 +267,8 @@ export function scoreLyricsCandidate(
 export type AcceptanceDecision = 'AUTO_ACCEPT' | 'CORROBORATED_ACCEPT' | 'FALLBACK_ONLY' | 'REJECT';
 
 export function evaluateAcceptance(score: number): AcceptanceDecision {
-  if (score >= 0.90) return 'AUTO_ACCEPT';
-  if (score >= 0.82) return 'CORROBORATED_ACCEPT';
-  if (score >= 0.70) return 'FALLBACK_ONLY';
+  if (score >= 0.88) return 'AUTO_ACCEPT';
+  if (score >= 0.78) return 'CORROBORATED_ACCEPT';
+  if (score >= 0.65) return 'FALLBACK_ONLY';
   return 'REJECT';
 }
