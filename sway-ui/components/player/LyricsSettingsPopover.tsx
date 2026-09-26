@@ -37,6 +37,7 @@ export function LyricsSettingsPopover({
     blur,
     align,
     showAccentBar,
+    showRomanized,
     layoutMode,
     backgroundStyle,
     showInstrumentalCountdown,
@@ -47,6 +48,7 @@ export function LyricsSettingsPopover({
     setBlur,
     setAlign,
     setShowAccentBar,
+    setShowRomanized,
     setLayoutMode,
     setBackgroundStyle,
     setShowInstrumentalCountdown,
@@ -384,6 +386,24 @@ export function LyricsSettingsPopover({
                   <span
                     className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
                       showInstrumentalCountdown ? 'left-[18px]' : 'left-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-white/75">Hinglish / Romanized Lyrics</span>
+                <button
+                  type="button"
+                  onClick={() => setShowRomanized(!showRomanized)}
+                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                    showRomanized ? 'bg-white/40' : 'bg-white/10'
+                  }`}
+                  aria-pressed={showRomanized}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      showRomanized ? 'left-[18px]' : 'left-0.5'
                     }`}
                   />
                 </button>

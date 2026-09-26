@@ -51,7 +51,7 @@ const DEFAULT_SETTINGS = {
   contrast: 'medium' as LyricsContrast,
   blur: 'light' as LyricsBlur,
   align: 'left' as LyricsAlign,
-  showAccentBar: true,
+  showAccentBar: false,
   showRomanized: false,
   layoutMode: 'split' as LyricsLayoutMode,
   backgroundStyle: 'wash' as LyricsBackgroundStyle,
@@ -229,10 +229,10 @@ export function getLyricsCSSVars(settings: LyricsSettingsState) {
     fontFamilyVal = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   }
 
-  // Contrast (inactive opacity)
-  let inactiveOpacity = '0.28';
-  if (settings.contrast === 'high') inactiveOpacity = '0.18';
-  else if (settings.contrast === 'subtle') inactiveOpacity = '0.42';
+  // Contrast (inactive opacity matching Apple Music)
+  let inactiveOpacity = '0.35';
+  if (settings.contrast === 'high') inactiveOpacity = '0.22';
+  else if (settings.contrast === 'subtle') inactiveOpacity = '0.48';
 
   // Blur
   let blurVal = '1.2px';
@@ -243,20 +243,20 @@ export function getLyricsCSSVars(settings: LyricsSettingsState) {
   const justifyContent = textAlign === 'center' ? 'center' : 'flex-start';
   const transformOrigin = textAlign === 'center' ? 'center center' : 'left center';
 
-  // Background styling flags
-  let bgBrightness = '0.28';
-  let bgOpacity = '0.82';
+  // Background styling flags — Apple Music authentic luminous values
+  let bgBrightness = '0.82';
+  let bgOpacity = '0.95';
   if (settings.backgroundStyle === 'oled') {
     bgBrightness = '0';
     bgOpacity = '0';
     blurVal = '0px';
   } else if (settings.backgroundStyle === 'slate') {
-    bgBrightness = '0.14';
-    bgOpacity = '0.45';
+    bgBrightness = '0.30';
+    bgOpacity = '0.65';
     blurVal = '0.6px';
   } else if (settings.backgroundStyle === 'mesh') {
-    bgBrightness = '0.35';
-    bgOpacity = '0.90';
+    bgBrightness = '0.90';
+    bgOpacity = '1.0';
   }
 
   return {

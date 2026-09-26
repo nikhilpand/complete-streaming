@@ -10,7 +10,7 @@ import {
   ChevronDown, Play, Pause, SkipBack, SkipForward,
   Shuffle, Repeat, Repeat1, Loader2, X, Music2, RotateCcw,
   Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles, Share2,
-  MessageSquareQuote,
+  MessageSquareQuote, MoreHorizontal,
 } from 'lucide-react';
 import { parseLRC, findActiveIndex, type ParsedLyricLine } from '@/lib/lyric-parser';
 import { getProxiedImageUrl, fetchLyrics } from '@/lib/api';
@@ -265,10 +265,10 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const [activeLyrics, setActiveLyrics] = useState<ParsedLyricLine[]>([]);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState(false);
-  const [lyricsProvider, setLyricsProvider] = useState<string>('');
+  const [_lyricsProvider, setLyricsProvider] = useState<string>('');
   const [lyricsSyncQuality, setLyricsSyncQuality] = useState<string>('LINE');
   const [provenance, setProvenance] = useState<LyricsTimingProvenance | null>(null);
-  const [hasHindiScript, setHasHindiScript] = useState<boolean>(false);
+  const [_hasHindiScript, setHasHindiScript] = useState<boolean>(false);
 
   // --- User Manual Scroll & Touch Handling ---
   const [isUserScrolling, setIsUserScrolling] = useState(false);
@@ -806,297 +806,175 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       className={`better-lyrics-page blyrics-layout-${lyricsSettings.layoutMode || 'split'} blyrics-bg-${lyricsSettings.backgroundStyle || 'wash'} ${lyricsSettings.showAccentBar ? 'blyrics-accent-bar' : ''} ${lyricsSettings.align === 'center' ? 'blyrics-align-center' : ''}`}
       style={{
         background: bgMain,
-        '--blyrics-background-img': coverUrl ? `url(${coverUrl})` : 'none',
+        '--blyrics-background-img': coverUrl ? `url("${coverUrl}")` : 'none',
         ...customCSSVars,
       } as React.CSSProperties}
     >
-      {/* Ambient aurora layer — CSS-driven, no JS */}
-      <div className="blyrics-aurora" aria-hidden="true" />
+      {/* Apple Music Fluid Multi-Layer Rotating Artwork Background */}
+      <div className="blyrics-fluid-canvas" aria-hidden="true">
+        <div className="blyrics-fluid-layer blyrics-fluid-layer-1" />
+        <div className="blyrics-fluid-layer blyrics-fluid-layer-2" />
+        <div className="blyrics-fluid-layer blyrics-fluid-layer-3" />
+        <div className="blyrics-fluid-layer blyrics-fluid-layer-4" />
+      </div>
 
-      {/* ── Desktop Top Header Mode Switcher & Actions ── */}
-      <div className="hidden lg:flex absolute top-5 left-8 right-8 z-[2000] items-center justify-between pointer-events-none">
-        {/* Left: Interactive Mode Switcher Pill */}
-        <div className="flex items-center gap-2 pointer-events-auto">
-          {/* Layout Mode Pill */}
-          <div className="flex items-center p-1 rounded-full bg-black/40 backdrop-blur-2xl border border-white/15 shadow-xl text-[11px] font-medium">
-            {[
-              { id: 'split' as LyricsLayoutMode, label: 'Split' },
-              { id: 'focus' as LyricsLayoutMode, label: 'Sing' },
-              { id: 'column' as LyricsLayoutMode, label: 'Stream' },
-              { id: 'canvas' as LyricsLayoutMode, label: 'Canvas' },
-            ].map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => lyricsSettings.setLayoutMode(m.id)}
-                className={`px-3 py-1 rounded-full transition-all cursor-pointer ${
-                  lyricsSettings.layoutMode === m.id
-                    ? 'bg-white/25 text-white font-semibold shadow-sm'
-                    : 'text-white/60 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Atmosphere Mode Pill */}
-          <div className="flex items-center p-1 rounded-full bg-black/40 backdrop-blur-2xl border border-white/15 shadow-xl text-[11px] font-medium">
-            {[
-              { id: 'mesh' as LyricsBackgroundStyle, label: 'Aurora' },
-              { id: 'wash' as LyricsBackgroundStyle, label: 'Wash' },
-              { id: 'slate' as LyricsBackgroundStyle, label: 'Slate' },
-              { id: 'oled' as LyricsBackgroundStyle, label: 'OLED' },
-            ].map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => lyricsSettings.setBackgroundStyle(a.id)}
-                className={`px-3 py-1 rounded-full transition-all cursor-pointer ${
-                  lyricsSettings.backgroundStyle === a.id
-                    ? 'bg-white/25 text-white font-semibold shadow-sm'
-                    : 'text-white/60 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                {a.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Right: Actions */}
-        <div className="flex items-center gap-2.5 pointer-events-auto">
-          <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
-
-          <button
-            type="button"
-            onClick={() => setIsShareModalOpen(true)}
-            aria-label="Share lyrics card"
-            className="blyrics-action-btn"
-            title="Share Quote Card"
-          >
-            <Share2 size={17} />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsDrawerOpen((prev) => !prev)}
-            aria-label="Up next queue"
-            className={`blyrics-action-btn ${isDrawerOpen ? 'active' : ''}`}
-            title="Up Next & Recommendations"
-          >
-            <ListMusic size={18} />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleClose}
-            aria-label="Close lyrics"
-            className="blyrics-action-btn"
-            title="Close (Esc)"
-          >
-            <X size={19} />
-          </button>
-        </div>
+      {/* ── Minimal Unobtrusive Close & Settings (Apple Music style) ── */}
+      <div className="hidden lg:flex absolute top-6 right-8 z-[2000] items-center gap-2">
+        <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
+        <button
+          type="button"
+          onClick={handleClose}
+          aria-label="Close lyrics"
+          className="w-9 h-9 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+          title="Close (Esc)"
+        >
+          <X size={20} />
+        </button>
       </div>
 
       {/* Side Panel: Album Art, Metadata & Controls */}
       <div className="blyrics-side-panel">
-        {/* Mobile Back Button */}
-        <button
-          onClick={handleClose}
-          aria-label="Back to player"
-          className="lg:hidden w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-white/10 cursor-pointer active:scale-95"
-        >
-          <ChevronDown size={20} color="white" />
-        </button>
+        <div className="w-full max-w-[380px] flex flex-col gap-4">
+          {/* Mobile Back Button */}
+          <button
+            onClick={handleClose}
+            aria-label="Back to player"
+            className="lg:hidden w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-white/10 cursor-pointer active:scale-95 mb-1"
+          >
+            <ChevronDown size={20} color="white" />
+          </button>
 
-        {/* Album Artwork */}
-        <motion.div
-          initial={{ scale: 0.94, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="album-art shrink-0 overflow-hidden relative group"
-        >
-          <Artwork
-            src={coverUrl}
-            alt={currentTrack.title}
-            size={500}
-            className="w-full h-full object-cover select-none"
-          />
-        </motion.div>
+          {/* Album Artwork */}
+          <motion.div
+            initial={{ scale: 0.94, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="album-art shrink-0 overflow-hidden relative group"
+          >
+            <Artwork
+              src={coverUrl}
+              alt={currentTrack.title}
+              size={500}
+              className="w-full h-full object-cover select-none"
+            />
+          </motion.div>
 
-        {/* Track Title & Artist */}
-        <div className="track-info min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <h1 className="title select-text flex-1 truncate" title={currentTrack.title}>
-              {currentTrack.title}
-            </h1>
-            {/* Heart / Like Button */}
+          {/* Track Title, Artist, and Favorite/More */}
+          <div className="track-info min-w-0 w-full">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h1 className="title select-text truncate" title={currentTrack.title}>
+                  {currentTrack.title}
+                </h1>
+                <p className="artist truncate mt-1">
+                  {currentTrack.artist}{currentTrack.album ? ` — ${currentTrack.album}` : ''}
+                </p>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span className="text-[11px] font-medium tracking-wide text-white/45">
+                    Dolby Atmos
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                <button
+                  type="button"
+                  onClick={toggleLike}
+                  aria-label={isLiked ? 'Unlike track' : 'Like track'}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                  title={isLiked ? 'Liked' : 'Favorite'}
+                >
+                  <Heart
+                    size={17}
+                    className={isLiked ? 'fill-rose-500 text-rose-500' : 'text-white/60 hover:text-white'}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDrawerOpen((prev) => !prev)}
+                  aria-label="Up next queue"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                  title="Up Next"
+                >
+                  <MoreHorizontal size={17} className="text-white/60 hover:text-white" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Desktop Progress Seek Bar (isolated re-renders) ── */}
+          <DesktopLyricsProgressBar duration={duration} seekTo={seekTo} />
+
+          {/* ── Desktop Floating Vector Controls (Apple Music style) ── */}
+          <div className="hidden lg:flex blyrics-controls-pill w-full">
+            <button type="button" onClick={toggleShuffle} aria-label="Shuffle" title={shuffle ? 'Shuffle On' : 'Shuffle Off'}>
+              <Shuffle size={18} color={shuffle ? 'white' : 'rgba(255,255,255,0.42)'} strokeWidth={shuffle ? 2.5 : 1.8} />
+            </button>
+
+            <button type="button" onClick={skipPrev} aria-label="Previous" title="Previous (P)">
+              <SkipBack size={22} fill="white" color="white" />
+            </button>
+
             <button
               type="button"
-              onClick={toggleLike}
-              aria-label={isLiked ? 'Unlike track' : 'Like track'}
-              className="p-1 transition-transform hover:scale-115 active:scale-90 cursor-pointer shrink-0"
-              title={isLiked ? 'Liked' : 'Save to favorites'}
+              onClick={togglePlayPause}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              className="blyrics-play-btn"
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             >
-              <Heart
-                size={18}
-                className={isLiked ? 'fill-rose-500 text-rose-500' : 'text-white/50 hover:text-white'}
-              />
+              {isLoading ? (
+                <Loader2 size={24} className="animate-spin text-white" />
+              ) : isPlaying ? (
+                <Pause size={26} fill="white" color="white" />
+              ) : (
+                <Play size={26} fill="white" color="white" className="ml-0.5" />
+              )}
+            </button>
+
+            <button type="button" onClick={skipNext} aria-label="Next" title="Next (N)">
+              <SkipForward size={22} fill="white" color="white" />
+            </button>
+
+            <button type="button" onClick={cycleRepeat} aria-label="Repeat mode" title={`Repeat: ${repeat}`}>
+              {repeat === 'one' ? (
+                <Repeat1 size={18} color="white" strokeWidth={2.5} />
+              ) : (
+                <Repeat size={18} color={repeat === 'off' ? 'rgba(255,255,255,0.42)' : 'white'} strokeWidth={repeat === 'off' ? 1.8 : 2.5} />
+              )}
             </button>
           </div>
 
-          {/* Clickable Artists */}
-          <div className="artist flex flex-wrap items-center gap-1 text-white/70">
-            {artistList.map((art, idx) => (
-              <React.Fragment key={art}>
-                <Link
-                  href={`/search?q=${encodeURIComponent(art.trim())}`}
-                  className="hover:text-white hover:underline transition-colors"
-                  title={`Search ${art.trim()}`}
-                >
-                  {art.trim()}
-                </Link>
-                {idx < artistList.length - 1 && <span className="text-white/40">,</span>}
-              </React.Fragment>
-            ))}
-          </div>
-
-          {/* Audio Quality Badges (Apple Music Style) */}
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-white/90 border border-white/12 backdrop-blur-md">
-              Dolby Atmos
-            </span>
-            <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-white/90 border border-white/12 backdrop-blur-md">
-              Lossless
-            </span>
-          </div>
-
-          {/* Provider Badge & Script Toggle */}
-          {(lyricsProvider || hasHindiScript) && (
-            <div className="flex items-center gap-2 mt-2">
-              {lyricsProvider && (
-                <span className="text-[10px] font-mono tracking-wider px-2.5 py-0.5 rounded-full bg-white/10 text-white/80 border border-white/10 backdrop-blur-md">
-                  Source: {lyricsProvider.toUpperCase()} · Sync: {lyricsSyncQuality === 'WORD' ? 'Word' : lyricsSyncQuality === 'LINE' ? 'Line' : 'Plain'}
-                </span>
+          {/* Desktop Volume & Mute Control */}
+          <div className="hidden lg:flex items-center gap-3 w-full text-white/60 px-0.5">
+            <button
+              type="button"
+              onClick={() => setMuted(!isMuted)}
+              aria-label={isMuted ? 'Unmute' : 'Mute'}
+              className="hover:text-white transition-colors cursor-pointer shrink-0"
+              title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
+            >
+              {isMuted || volume === 0 ? (
+                <VolumeX size={16} />
+              ) : volume < 0.5 ? (
+                <Volume1 size={16} />
+              ) : (
+                <Volume2 size={16} />
               )}
-              {hasHindiScript && (
-                <button
-                  type="button"
-                  onClick={() => lyricsSettings.setShowRomanized(!lyricsSettings.showRomanized)}
-                  className="text-[10px] font-medium tracking-wide px-2.5 py-0.5 rounded-full bg-white/15 hover:bg-white/25 text-white/90 border border-white/20 transition-all cursor-pointer flex items-center gap-1.5"
-                  title="Toggle Devanagari Hindi / Romanized English lyrics"
-                >
-                  <Sparkles size={11} className="text-amber-300" />
-                  <span>{lyricsSettings.showRomanized ? 'English / Hinglish' : 'हिंदी (Hindi)'}</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Mobile Top Actions (inline inside top header) */}
-        <div className="lg:hidden flex items-center gap-1 shrink-0">
-          <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
-          <button
-            type="button"
-            onClick={() => setIsShareModalOpen(true)}
-            aria-label="Share lyrics card"
-            className="blyrics-action-btn"
-            title="Share Quote Card"
-          >
-            <Share2 size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsDrawerOpen((prev) => !prev)}
-            aria-label="Up next queue"
-            className={`blyrics-action-btn ${isDrawerOpen ? 'active' : ''}`}
-            title="Up Next"
-          >
-            <ListMusic size={16} />
-          </button>
-        </div>
-
-        {/* ── Desktop Progress Seek Bar (isolated re-renders) ── */}
-        <DesktopLyricsProgressBar duration={duration} seekTo={seekTo} />
-
-        {/* ── Desktop Controls Pill ── */}
-        <div
-          className="hidden lg:flex blyrics-controls-pill w-full"
-          style={{ background: pillBg, maxWidth: '340px' }}
-        >
-          <button type="button" onClick={toggleShuffle} aria-label="Shuffle" title={shuffle ? 'Shuffle On' : 'Shuffle Off'}>
-            <Shuffle size={17} color={shuffle ? 'white' : 'rgba(255,255,255,0.38)'} strokeWidth={shuffle ? 2.5 : 1.8} />
-          </button>
-
-          <button type="button" onClick={skipPrev} aria-label="Previous" title="Previous (P)">
-            <SkipBack size={20} color="white" />
-          </button>
-
-          <button
-            type="button"
-            onClick={togglePlayPause}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-            className="blyrics-play-btn"
-            style={{ background: pillActive }}
-            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-          >
-            {isLoading ? (
-              <Loader2 size={20} className="animate-spin text-white" />
-            ) : isPlaying ? (
-              <Pause size={20} color="white" />
-            ) : (
-              <Play size={20} fill="white" color="white" className="ml-0.5" />
-            )}
-          </button>
-
-          <button type="button" onClick={skipNext} aria-label="Next" title="Next (N)">
-            <SkipForward size={20} color="white" />
-          </button>
-
-          <button type="button" onClick={cycleRepeat} aria-label="Repeat mode" title={`Repeat: ${repeat}`}>
-            {repeat === 'one' ? (
-              <Repeat1 size={17} color="white" strokeWidth={2.5} />
-            ) : (
-              <Repeat size={17} color={repeat === 'off' ? 'rgba(255,255,255,0.38)' : 'white'} strokeWidth={repeat === 'off' ? 1.8 : 2.5} />
-            )}
-          </button>
-        </div>
-
-        {/* Desktop Volume & Mute Control */}
-        <div className="hidden lg:flex items-center gap-2.5 w-full max-w-[340px] px-2 text-white/60">
-          <button
-            type="button"
-            onClick={() => {
-              setMuted(!isMuted);
-            }}
-            aria-label={isMuted ? 'Unmute' : 'Mute'}
-            className="hover:text-white transition-colors cursor-pointer"
-            title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
-          >
-            {isMuted || volume === 0 ? (
-              <VolumeX size={16} />
-            ) : volume < 0.5 ? (
-              <Volume1 size={16} />
-            ) : (
-              <Volume2 size={16} />
-            )}
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.02}
-            value={isMuted ? 0 : volume}
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              setVolume(val);
-            }}
-            className="w-full h-1 bg-white/15 rounded-lg accent-white cursor-pointer"
-            aria-label="Volume level"
-          />
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.02}
+              value={isMuted ? 0 : volume}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setVolume(val);
+              }}
+              className="blyrics-volume-slider"
+              aria-label="Volume level"
+            />
+          </div>
         </div>
       </div>
 
