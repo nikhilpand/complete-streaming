@@ -229,6 +229,10 @@ def _score_relevance(query: str, item: SearchItem, source_rank: int) -> float:
     is_exact_title = bool(q_clean and q_clean == title_clean)
     if is_exact_title:
         score += 140.0
+        # Verbatim title match (without stripping "(From ...)" or movie tags) gets an extra boost
+        raw_t_clean = " ".join(re.sub(r'[^\w\s]', ' ', (item.title or '').lower()).split())
+        if q_clean == raw_t_clean:
+            score += 35.0
     elif q_clean and title_clean and (
         re.search(r"(?:\b|^)" + re.escape(q_clean) + r"(?:\b|$)", title_clean)
     ):
@@ -260,6 +264,10 @@ def _score_relevance(query: str, item: SearchItem, source_rank: int) -> float:
     ctr = extra.get("ctr")
     if isinstance(ctr, (int, float)) and ctr > 0:
         score += min(70.0, math.log10(ctr + 1) * 15.0)
+
+    # 4b. Native provider baseline bonus: prefer high-quality native JioSaavn streams and metadata
+    if item.provider == "saavn":
+        score += 20.0
 
     # 5. Demote derivative junk (slowed, sped up, workout, karaoke, etc.) unless query requested it
     query_has_deriv = any(kw in q_lower for kw in DERIVATIVE_KEYWORDS)
@@ -336,14 +344,49 @@ def _rank_and_merge(
       - Title deduplication: restricts duplicate same-title songs so top hits dominate without spamming same tracks
       - Bounded secondary fuzzy pass
     """
+    # Pass 1: Match JioSaavn items with YouTube items to inherit view counts.
+    # When JioSaavn already has a matching track, enrich it with YouTube's view count
+    # and mark the YouTube duplicate so JioSaavn remains the preferred high-bitrate version.
+    matched_yt_ids: set[str] = set()
+    for s_item in saavn_songs:
+        st_clean, sa_clean, _ = _extract_item_metadata(s_item)
+        s_artists = _extract_all_artists(s_item)
+        if sa_clean:
+            s_artists.add(sa_clean)
+
+        for y_item in yt_songs:
+            if y_item.id in matched_yt_ids:
+                continue
+            yt_clean, ya_clean, _ = _extract_item_metadata(y_item)
+            y_artists = _extract_all_artists(y_item)
+            if ya_clean:
+                y_artists.add(ya_clean)
+
+            if st_clean and yt_clean and st_clean == yt_clean:
+                # Same title: require artists to overlap or match so distinct compositions/artists are not falsely conflated
+                has_artist_match = bool(
+                    (s_artists & y_artists)
+                    or (sa_clean and ya_clean and (sa_clean in ya_clean or ya_clean in sa_clean))
+                )
+                if has_artist_match:
+                    if not s_item.extra:
+                        s_item.extra = {}
+                    y_views = (y_item.extra or {}).get("views")
+                    if y_views and not s_item.extra.get("views"):
+                        s_item.extra["views"] = y_views
+                    matched_yt_ids.add(y_item.id)
+                    break
+
     scored_candidates: list[tuple[float, SearchItem]] = []
     for i, item in enumerate(saavn_songs):
         scored_candidates.append((_score_relevance(query, item, i), item))
     for j, item in enumerate(yt_songs):
+        if item.id in matched_yt_ids:
+            continue
         scored_candidates.append((_score_relevance(query, item, j), item))
 
-    # Sort descending by score
-    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    # Sort descending by score; break ties in favor of saavn
+    scored_candidates.sort(key=lambda x: (x[0], 1 if x[1].provider == "saavn" else 0), reverse=True)
 
     merged: list[SearchItem] = []
     seen_provider_ids: set[str] = set()
@@ -541,11 +584,11 @@ class HybridMusicProvider(MusicProvider):
             except Exception as e:
                 logger.warning("Saavn short query search failed: %s", e)
 
-        # Full hybrid search: run Saavn + YouTube concurrently with 4.0s timeout on YouTube
+        # Full hybrid search: run Saavn + YouTube concurrently with 5.0s timeout on YouTube
         saavn_task = self.saavn.search(query, n=n, page=page, enrich=enrich)
         yt_task = asyncio.wait_for(
             self.youtube.search(query, n=min(n, 12), page=page),
-            timeout=4.0,
+            timeout=5.0,
         )
 
         saavn_res, yt_res = await asyncio.gather(saavn_task, yt_task, return_exceptions=True)
