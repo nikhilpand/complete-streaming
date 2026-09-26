@@ -84,6 +84,12 @@ class CandidateBuilder:
         profile: Optional[UserTasteProfile] = None,
     ) -> Tuple[List[Track], Dict[str, int]]:
         """Concurrently retrieve candidates across generators with exact quota enforcement."""
+        # Resolve the YouTube seed video ID once — shared across ytm_radio and
+        # ytm_related so neither generator independently calls provider.search().
+        seed_video_id: Optional[str] = await self._resolve_video_id_for_seed(
+            seed_song, profile
+        )
+
         tasks = [
             self._gen_same_artist(seed_song),
             self._gen_similar_artists(seed_song, profile),
@@ -92,8 +98,8 @@ class CandidateBuilder:
             self._gen_collaborative(seed_song),
             self._gen_discovery(seed_song, profile),
             self._gen_exploration(seed_song, profile),
-            self._gen_ytm_radio(seed_song, profile),
-            self._gen_ytm_related(seed_song, profile),
+            self._gen_ytm_radio(seed_video_id),
+            self._gen_ytm_related(seed_video_id),
             self._gen_ytm_artist(seed_song, profile),
         ]
 
@@ -486,29 +492,27 @@ class CandidateBuilder:
         return None
 
     async def _gen_ytm_radio(
-        self, seed: Optional[Song], profile: Optional[UserTasteProfile]
+        self, video_id: Optional[str]
     ) -> List[Song]:
         if not hasattr(self.provider, "get_radio_candidates"):
             return []
         try:
-            vid = await self._resolve_video_id_for_seed(seed, profile)
-            if not vid:
+            if not video_id:
                 return []
-            return await self.provider.get_radio_candidates(vid, limit=self.budget.ytm_radio)
+            return await self.provider.get_radio_candidates(video_id, limit=self.budget.ytm_radio)
         except Exception as e:
             logger.debug("CandidateBuilder._gen_ytm_radio failed: %s", e)
             return []
 
     async def _gen_ytm_related(
-        self, seed: Optional[Song], profile: Optional[UserTasteProfile]
+        self, video_id: Optional[str]
     ) -> List[Song]:
         if not hasattr(self.provider, "get_related_candidates"):
             return []
         try:
-            vid = await self._resolve_video_id_for_seed(seed, profile)
-            if not vid:
+            if not video_id:
                 return []
-            return await self.provider.get_related_candidates(vid, limit=self.budget.ytm_related)
+            return await self.provider.get_related_candidates(video_id, limit=self.budget.ytm_related)
         except Exception as e:
             logger.debug("CandidateBuilder._gen_ytm_related failed: %s", e)
             return []

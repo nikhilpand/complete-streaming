@@ -6,7 +6,7 @@ Protects the upstream provider from cascading failure.
 States:
   CLOSED    Normal operation. Failures counted.
   OPEN      Too many failures. All requests rejected immediately.
-  HALF_OPEN Cooldown expired. One probe allowed through.
+  HALF_OPEN Cooldown expired. Exactly ONE probe allowed through.
 
 Transitions:
   CLOSED  → OPEN       failure_threshold consecutive failures
@@ -15,6 +15,9 @@ Transitions:
   HALF_OPEN→ OPEN      any failure
 
 Thread-safety: asyncio.Lock protects state transitions.
+Probe serialization: _half_open_probe_inflight ensures only a single
+coroutine probes the upstream in HALF_OPEN state; all other concurrent
+callers receive ProviderUnavailable until the probe completes.
 """
 
 from __future__ import annotations
@@ -52,6 +55,8 @@ class CircuitBreaker:
         self._success_count = 0
         self._opened_at: float | None = None
         self._lock = asyncio.Lock()
+        # Serializes HALF_OPEN probes: only one caller may probe at a time.
+        self._half_open_probe_inflight: bool = False
 
     @property
     def state(self) -> CBState:
@@ -61,7 +66,8 @@ class CircuitBreaker:
         """
         Execute an async callable through the circuit breaker.
 
-        Raises ProviderUnavailable if OPEN.
+        Raises ProviderUnavailable if OPEN or if a HALF_OPEN probe is
+        already in-flight (so only one probe reaches the upstream at a time).
         Records success/failure to manage state transitions.
         """
         await self._check_state()
@@ -70,7 +76,7 @@ class CircuitBreaker:
             result = await coro_fn(*args, **kwargs)
             await self._on_success()
             return result
-        except Exception as exc:
+        except Exception:
             await self._on_failure()
             raise
 
@@ -79,8 +85,10 @@ class CircuitBreaker:
             if self._state == CBState.OPEN:
                 elapsed = time.monotonic() - (self._opened_at or 0)
                 if elapsed >= self.timeout:
+                    # Transition to HALF_OPEN, reset probe flag
                     self._state = CBState.HALF_OPEN
                     self._success_count = 0
+                    self._half_open_probe_inflight = False
                 else:
                     raise ProviderUnavailable(
                         f"Circuit breaker OPEN for {self.provider} "
@@ -88,9 +96,21 @@ class CircuitBreaker:
                         provider=self.provider,
                     )
 
+            if self._state == CBState.HALF_OPEN:
+                if self._half_open_probe_inflight:
+                    # Another coroutine is already probing — reject this caller
+                    raise ProviderUnavailable(
+                        f"Circuit breaker HALF_OPEN probe already in-flight for "
+                        f"{self.provider} — waiting for probe to resolve",
+                        provider=self.provider,
+                    )
+                # Claim the probe slot while holding the lock
+                self._half_open_probe_inflight = True
+
     async def _on_success(self) -> None:
         async with self._lock:
             if self._state == CBState.HALF_OPEN:
+                self._half_open_probe_inflight = False
                 self._success_count += 1
                 if self._success_count >= self.success_threshold:
                     self._state = CBState.CLOSED
@@ -102,6 +122,7 @@ class CircuitBreaker:
         async with self._lock:
             if self._state == CBState.HALF_OPEN:
                 # Any failure in half-open reopens immediately
+                self._half_open_probe_inflight = False
                 self._state = CBState.OPEN
                 self._opened_at = time.monotonic()
             elif self._state == CBState.CLOSED:
@@ -116,4 +137,5 @@ class CircuitBreaker:
             "failure_count": self._failure_count,
             "success_count": self._success_count,
             "opened_at": self._opened_at,
+            "half_open_probe_inflight": self._half_open_probe_inflight,
         }

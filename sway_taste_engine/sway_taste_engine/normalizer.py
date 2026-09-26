@@ -307,12 +307,24 @@ def canonical_song_key(
     subtitle: Optional[str] = "",
     album: Optional[str] = "",
 ) -> tuple[str, str]:
-    """Derive canonical (normalized_title, normalized_primary_artist) identity key."""
+    """Derive canonical (normalized_title, normalized_artist_set) identity key.
+
+    The second element of the tuple is the **pipe-joined sorted full set** of
+    normalized artist names, not just the alphabetically-first artist.
+
+    This prevents multi-artist collaborations from collapsing incorrectly:
+      "Song X – Artist A & Artist B"  → ('song x', 'artist a|artist b')
+      "Song X – Artist A & Artist C"  → ('song x', 'artist a|artist c')
+    Both have the same title but different artist sets → different canonical keys.
+
+    Recording identity (same performance by the same artists) is captured via
+    provider_id / ISRC matching at the deduplication layer.
+    """
     t_norm = normalize_title(title)
     arts = extract_artists(artist_name, subtitle=subtitle, title=title, album=album)
     if arts:
-        # Sort artists to ensure consistent canonical key regardless of ordering differences in multi-artist credits
-        a_norm = sorted(arts)[0]
+        # Use the full sorted artist set as the canonical artist token.
+        a_norm = "|".join(sorted(arts))
     else:
         a_norm = normalize_artist(artist_name)
     if not t_norm:

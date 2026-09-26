@@ -353,37 +353,65 @@ def _rank_and_merge(
       - Bounded secondary fuzzy pass
     """
     # Pass 1: Match JioSaavn items with YouTube items to inherit view counts.
-    # When JioSaavn already has a matching track, enrich it with YouTube's view count
-    # and mark the YouTube duplicate so JioSaavn remains the preferred high-bitrate version.
+    # Strategy: for each (title, artist_set) key, find the YouTube candidate
+    # with the HIGHEST view count rather than the first match.  This avoids
+    # lower-quality uploads "donating" their view count while a better-matching
+    # upload later in the results list is ignored.
     matched_yt_ids: set[str] = set()
+
+    # Step 1a: build index (normalized_title, normalized_artist_set) → best YT item by views
+    yt_best_by_key: dict[tuple[str, str], SearchItem] = {}
+    for y_item in yt_songs:
+        yt_clean, ya_clean, _ = _extract_item_metadata(y_item)
+        if not yt_clean:
+            continue
+        y_artists = _extract_all_artists(y_item)
+        if ya_clean:
+            y_artists.add(ya_clean)
+        key = (yt_clean, "|".join(sorted(y_artists)))
+        y_views = parse_views_to_int((y_item.extra or {}).get("views"))
+        existing = yt_best_by_key.get(key)
+        existing_views = parse_views_to_int((existing.extra or {}).get("views")) if existing else -1
+        if y_views > existing_views:
+            yt_best_by_key[key] = y_item
+
+    # Step 1b: for each Saavn track, look up the best matching YT item
     for s_item in saavn_songs:
         st_clean, sa_clean, _ = _extract_item_metadata(s_item)
         s_artists = _extract_all_artists(s_item)
         if sa_clean:
             s_artists.add(sa_clean)
+        if not st_clean:
+            continue
 
-        for y_item in yt_songs:
-            if y_item.id in matched_yt_ids:
-                continue
-            yt_clean, ya_clean, _ = _extract_item_metadata(y_item)
-            y_artists = _extract_all_artists(y_item)
-            if ya_clean:
-                y_artists.add(ya_clean)
+        # Try exact (title, artist_set) match first
+        s_key = (st_clean, "|".join(sorted(s_artists)))
+        best_yt = yt_best_by_key.get(s_key)
 
-            if st_clean and yt_clean and st_clean == yt_clean:
-                # Same title: require artists to overlap or match so distinct compositions/artists are not falsely conflated
+        # Fall back to checking any YT key with same title and overlapping artists
+        if best_yt is None:
+            for (yt_clean, _), y_item in yt_best_by_key.items():
+                if yt_clean != st_clean:
+                    continue
+                y_artists = _extract_all_artists(y_item)
+                ya_clean = _extract_item_metadata(y_item)[1]
+                if ya_clean:
+                    y_artists.add(ya_clean)
                 has_artist_match = bool(
                     (s_artists & y_artists)
                     or (sa_clean and ya_clean and (sa_clean in ya_clean or ya_clean in sa_clean))
                 )
                 if has_artist_match:
-                    if not s_item.extra:
-                        s_item.extra = {}
-                    y_views = (y_item.extra or {}).get("views")
-                    if y_views and not s_item.extra.get("views"):
-                        s_item.extra["views"] = y_views
-                    matched_yt_ids.add(y_item.id)
+                    best_yt = y_item
                     break
+
+        if best_yt is not None:
+            if not s_item.extra:
+                s_item.extra = {}
+            y_views = (best_yt.extra or {}).get("views")
+            if y_views and not s_item.extra.get("views"):
+                s_item.extra["views"] = y_views
+            matched_yt_ids.add(best_yt.id)
 
     scored_candidates: list[tuple[float, SearchItem]] = []
     for i, item in enumerate(saavn_songs):
@@ -608,7 +636,10 @@ class HybridMusicProvider(MusicProvider):
                 total_songs=0, total_albums=0, total_artists=0, total_playlists=0,
             )
         else:
-            saavn_results = saavn_res
+            # Deepcopy before any mutation so the Saavn provider's internal
+            # cache object is never modified (view-count inheritance in Pass 1
+            # of _rank_and_merge writes into s_item.extra).
+            saavn_results = copy.deepcopy(saavn_res)
 
         yt_songs: list[SearchItem] = []
         yt_albums: list[SearchItem] = []

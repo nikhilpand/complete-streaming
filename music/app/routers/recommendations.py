@@ -112,24 +112,41 @@ def song_to_engine_track(song: Any) -> Track:
 
 
 class EventIn(BaseModel):
-    user_id: str = "guest_user"
-    track_id: Optional[str] = ""
-    type: Optional[str] = None
-    event_type: Optional[str] = None
-    session_id: Optional[str] = None
-    title: Optional[str] = None
-    artist: Optional[str] = None
-    artist_id: Optional[str] = None
-    album: Optional[str] = None
-    genre: Optional[str] = None
-    mood: Optional[str] = None
+    # Idempotency / deduplication key — client generates this; duplicate events
+    # with the same client_event_id are silently dropped (not reprocessed).
+    client_event_id: Optional[str] = Field(default=None, max_length=64)
+
+    user_id: str = Field(default="guest_user", max_length=128)
+    track_id: Optional[str] = Field(default="", max_length=256)
+    type: Optional[str] = Field(default=None, max_length=64)
+    event_type: Optional[str] = Field(default=None, max_length=64)
+    session_id: Optional[str] = Field(default=None, max_length=128)
+    title: Optional[str] = Field(default=None, max_length=256)
+    artist: Optional[str] = Field(default=None, max_length=256)
+    artist_id: Optional[str] = Field(default=None, max_length=256)
+    album: Optional[str] = Field(default=None, max_length=256)
+    genre: Optional[str] = Field(default=None, max_length=128)
+    mood: Optional[str] = Field(default=None, max_length=128)
     position_ms: Optional[int] = Field(default=0, ge=0)
     duration_ms: Optional[int] = Field(default=None, ge=0)
     completion_ratio: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    thumbnail: Optional[str] = None
-    source: Optional[str] = None
-    query: Optional[str] = None
+    thumbnail: Optional[str] = Field(default=None, max_length=512)
+    source: Optional[str] = Field(default=None, max_length=128)
+    query: Optional[str] = Field(default=None, max_length=256)
+    # metadata dict is allowed but total serialized size is capped at 4 KB
     metadata: Optional[Dict[str, Any]] = None
+
+    @staticmethod
+    def _metadata_bytes(meta: Dict[str, Any]) -> int:
+        import json as _json
+        try:
+            return len(_json.dumps(meta, ensure_ascii=False).encode())
+        except Exception:
+            return 0
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.metadata and self._metadata_bytes(self.metadata) > 4096:
+            raise ValueError("metadata payload exceeds 4 KB limit")
 
 
 class UserSettingsIn(BaseModel):
@@ -189,6 +206,19 @@ def post_event(e: EventIn, request: Request = None):
     evt_raw = e.event_type or e.type or "play_started"
     evt_type = EVENT_MAP.get(evt_raw, EventType.PLAY_STARTED)
 
+    # Idempotency: if client supplied a client_event_id, drop duplicates silently.
+    if e.client_event_id:
+        try:
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT id FROM event_log WHERE event_id=? LIMIT 1",
+                    (e.client_event_id,),
+                ).fetchone()
+                if row:
+                    return {"ok": True, "accepted": False, "event": evt_raw, "track_id": sid, "duplicate": True}
+        except Exception as ex:
+            logger.debug("Dedup check failed (non-fatal): %s", ex)
+
     if e.thumbnail and sid:
         _artwork_cache[sid] = e.thumbnail
 
@@ -242,7 +272,7 @@ def post_event(e: EventIn, request: Request = None):
 
 
     user_event = UserEvent(
-        event_id=f"evt_{uuid.uuid4().hex[:12]}",
+        event_id=e.client_event_id or f"evt_{uuid.uuid4().hex[:12]}",
         user_id=e.user_id,
         session_id=e.session_id or f"sess_{e.user_id}",
         event_type=evt_type,

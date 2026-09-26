@@ -158,19 +158,41 @@ def _yt_item_to_canonical_song(item: dict) -> Optional[Song]:
 class YouTubeProvider(MusicProvider):
     """
     YouTube Music data provider.
+
+    Guards against upstream fan-out with:
+      - _sem: asyncio.Semaphore(4) — at most 4 concurrent ytmusicapi calls
+      - _cb: CircuitBreaker — trips after 5 consecutive failures, 30-s cooldown
+        with serialized HALF_OPEN probe (only one caller probes at a time).
     """
 
     provider_name: str = "youtube"
+    _MAX_CONCURRENCY: int = 4
 
     def __init__(self, cache=None) -> None:
+        from app.core.circuit_breaker import CircuitBreaker
         self._cache = cache
         self._yt = None
+        self._sem = asyncio.Semaphore(self._MAX_CONCURRENCY)
+        self._cb = CircuitBreaker(
+            provider="youtube",
+            failure_threshold=5,
+            success_threshold=2,
+            timeout=30.0,
+        )
 
     def _get_yt(self):
         if self._yt is None:
             from ytmusicapi import YTMusic
             self._yt = YTMusic()
         return self._yt
+
+    async def _yt_call(self, fn):
+        """Run a zero-arg callable through the semaphore + circuit breaker."""
+        async def _wrapped():
+            async with self._sem:
+                return await asyncio.to_thread(fn)
+
+        return await self._cb.call(_wrapped)
 
     # ── Search ───────────────────────────────────────────────────────────────
 
@@ -181,28 +203,32 @@ class YouTubeProvider(MusicProvider):
         n: int = 20,
         page: int = 1,
         enrich: bool = False,
+        include_entities: bool = False,
     ) -> SearchResults:
-        def _fetch_songs():
-            try:
-                return self._get_yt().search(query, filter="songs") or []
-            except Exception as e:
-                logger.warning("ytmusicapi songs search error for %r: %s", query, e)
-                return []
+        """Search YouTube Music.
 
-        def _fetch_general():
+        include_entities=False (default): only the filter="songs" call is made —
+        one ytmusicapi call per search. Set include_entities=True to also fetch
+        artists/albums (costs a second unfiltered call).
+        """
+        try:
+            songs_raw = await self._yt_call(
+                lambda: self._get_yt().search(query, filter="songs") or []
+            )
+        except Exception as e:
+            logger.warning("ytmusicapi songs search error for %r: %s", query, e)
+            songs_raw = []
+
+        general_raw: list = []
+        if include_entities:
             try:
-                return self._get_yt().search(query) or []
+                general_raw = await self._yt_call(
+                    lambda: self._get_yt().search(query) or []
+                )
             except Exception as e:
                 logger.debug("ytmusicapi general search error for %r: %s", query, e)
-                return []
+                general_raw = []
 
-        songs_res, general_res = await asyncio.gather(
-            asyncio.to_thread(_fetch_songs),
-            asyncio.to_thread(_fetch_general),
-            return_exceptions=True,
-        )
-        songs_raw = songs_res if isinstance(songs_res, list) else []
-        general_raw = general_res if isinstance(general_res, list) else []
         songs: list[SearchItem] = []
         seen_vids: set[str] = set()
 
@@ -329,7 +355,10 @@ class YouTubeProvider(MusicProvider):
             # Fallback to search if get_song details empty
             return None
 
-        details = await asyncio.to_thread(_fetch_song_details)
+        try:
+            details = await self._yt_call(_fetch_song_details)
+        except Exception:
+            details = None
 
         if details:
             title = details.get("title", "Unknown Title")
@@ -486,7 +515,11 @@ class YouTubeProvider(MusicProvider):
                 logger.debug("yt.get_watch_playlist error for %s: %s", vid, e)
                 return []
 
-        raw_tracks = await asyncio.to_thread(_fetch_radio)
+        try:
+            raw_tracks = await self._yt_call(_fetch_radio)
+        except Exception as e:
+            logger.debug("get_radio_candidates guarded call failed for %s: %s", vid, e)
+            return []
         candidates: list[Song] = []
         for it in raw_tracks:
             # Skip the seed track itself
@@ -524,7 +557,11 @@ class YouTubeProvider(MusicProvider):
                 logger.debug("yt.get_song_related error for %s: %s", vid, e)
                 return []
 
-        raw_tracks = await asyncio.to_thread(_fetch_related)
+        try:
+            raw_tracks = await self._yt_call(_fetch_related)
+        except Exception as e:
+            logger.debug("get_related_candidates guarded call failed for %s: %s", vid, e)
+            return []
         candidates: list[Song] = []
         for it in raw_tracks:
             if it.get("videoId") == vid:
@@ -555,7 +592,11 @@ class YouTubeProvider(MusicProvider):
                 logger.debug("yt.get_artist / search error for %s: %s", target, e)
                 return []
 
-        raw_tracks = await asyncio.to_thread(_fetch_artist)
+        try:
+            raw_tracks = await self._yt_call(_fetch_artist)
+        except Exception as e:
+            logger.debug("get_artist_candidates guarded call failed for %s: %s", target, e)
+            return []
         candidates: list[Song] = []
         for it in raw_tracks:
             song = _yt_item_to_canonical_song(it)
