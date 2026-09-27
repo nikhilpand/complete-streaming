@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export type LyricsFontSize = 'sm' | 'md' | 'lg' | 'xl';
 export type LyricsLineHeight = 'compact' | 'normal' | 'relaxed';
@@ -29,6 +29,7 @@ export interface LyricsSettingsState {
   showInstrumentalCountdown: boolean;
   karaokeEffect: LyricsKaraokeEffect;
   perTrackSyncOffset: Record<string, number>; // trackId -> offset in ms
+  perTrackSyncOffsetUpdatedAt?: Record<string, number>; // trackId -> timestamp in ms
 
   setFontSize: (fontSize: LyricsFontSize) => void;
   setLineHeight: (lineHeight: LyricsLineHeight) => void;
@@ -69,6 +70,33 @@ const DEFAULT_SETTINGS = {
   showInstrumentalCountdown: true,
   karaokeEffect: 'smooth_sweep' as LyricsKaraokeEffect,
   perTrackSyncOffset: {} as Record<string, number>,
+  perTrackSyncOffsetUpdatedAt: {} as Record<string, number>,
+};
+
+export function getSettingsStorageKey(): string {
+  const id =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('sway_account_id') || 'guest_user'
+      : typeof localStorage !== 'undefined'
+        ? localStorage.getItem('sway_account_id') || 'guest_user'
+        : 'guest_user';
+
+  return `sway-lyrics-settings:${id}`;
+}
+
+const accountScopedStorage = {
+  getItem: (_name: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem(getSettingsStorageKey());
+  },
+  setItem: (_name: string, value: string): void => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(getSettingsStorageKey(), value);
+  },
+  removeItem: (_name: string): void => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(getSettingsStorageKey());
+  },
 };
 
 export const useLyricsSettings = create<LyricsSettingsState>()(
@@ -98,12 +126,33 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
       setKaraokeEffect: (karaokeEffect) => set({ karaokeEffect }),
 
       setTrackSyncOffset: (trackId, offsetMs) =>
-        set((state) => ({
-          perTrackSyncOffset: {
-            ...state.perTrackSyncOffset,
-            [trackId]: offsetMs,
-          },
-        })),
+        set((state) => {
+          const MAX_TRACK_OFFSETS = 200;
+          const now = Date.now();
+          const nextOffsets = { ...state.perTrackSyncOffset, [trackId]: offsetMs };
+          const nextTimestamps = { ...(state.perTrackSyncOffsetUpdatedAt || {}), [trackId]: now };
+
+          const keys = Object.keys(nextOffsets);
+          if (keys.length > MAX_TRACK_OFFSETS) {
+            // Sort keys by updated timestamp ascending (oldest first)
+            const sortedKeys = keys.sort((a, b) => {
+              const timeA = nextTimestamps[a] ?? 0;
+              const timeB = nextTimestamps[b] ?? 0;
+              return timeA - timeB;
+            });
+            const excess = keys.length - MAX_TRACK_OFFSETS;
+            for (let i = 0; i < excess; i++) {
+              const k = sortedKeys[i];
+              delete nextOffsets[k];
+              delete nextTimestamps[k];
+            }
+          }
+
+          return {
+            perTrackSyncOffset: nextOffsets,
+            perTrackSyncOffsetUpdatedAt: nextTimestamps,
+          };
+        }),
 
       getTrackSyncOffset: (trackId) => {
         if (!trackId) return get().globalSyncOffsetMs || 0;
@@ -200,7 +249,8 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
     }),
     {
       name: 'sway-lyrics-settings',
-      version: 3,
+      version: 4,
+      storage: createJSONStorage(() => accountScopedStorage),
       migrate: (persistedState: any, version: number) => {
         const state = { ...DEFAULT_SETTINGS, ...(persistedState || {}) };
         if (version < 3) {
@@ -216,52 +266,148 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
   )
 );
 
-// Auto-sync lyrics preferences to/from backend
-if (typeof window !== 'undefined') {
-  const getUserId = () => localStorage.getItem('sway_account_id') || 'guest_user';
-  let isHydrating = true;
+export const getUserId = () => {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem('sway_account_id') || 'guest_user';
+  }
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('sway_account_id') || 'guest_user';
+  }
+  return 'guest_user';
+};
 
-  // Hydrate initial cloud-persisted settings
-  fetch(`/api/proxy/users/${getUserId()}/settings`)
+let currentActiveUserId = getUserId();
+let isHydrating = false;
+
+export function switchAccount(newUserId?: string) {
+  const nextId = newUserId || getUserId();
+  currentActiveUserId = nextId;
+
+  // 1. Old account settings must NOT remain active
+  let loadedState: any = null;
+  if (typeof window !== 'undefined' || typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(`sway-lyrics-settings:${nextId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        loadedState = parsed.state || parsed;
+      }
+    } catch {
+      // Ignore parse error
+    }
+  }
+
+  // Replace existing store state with the new account's settings
+  useLyricsSettings.setState({ ...DEFAULT_SETTINGS, ...(loadedState || {}) });
+
+  // 2. Hydrate from backend for the new account
+  hydrateCloudSettings(nextId);
+}
+
+export function hydrateCloudSettings(targetUserId?: string): Promise<void> {
+  const hydrationUserId = targetUserId || getUserId();
+  isHydrating = true;
+
+  return fetch(`/api/proxy/users/${hydrationUserId}/settings`)
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
+      // Guard D: Add an account identity guard to hydration.
+      // If user switched accounts while fetch was in flight, discard!
+      if (getUserId() !== hydrationUserId) {
+        return;
+      }
+
       if (data?.settings && typeof data.settings === 'object') {
         const s = data.settings;
-        useLyricsSettings.setState((prev) => ({
-          ...prev,
-          ...(s.fontSize && { fontSize: s.fontSize }),
-          ...(s.lineHeight && { lineHeight: s.lineHeight }),
-          ...(s.fontFamily && { fontFamily: s.fontFamily }),
-          ...(s.contrast && { contrast: s.contrast }),
-          ...(s.blur && { blur: s.blur }),
-          ...(s.align && { align: s.align }),
-          ...(s.showAccentBar !== undefined && { showAccentBar: s.showAccentBar }),
-          ...(s.showRomanized !== undefined && { showRomanized: s.showRomanized }),
-          ...(s.layoutMode && { layoutMode: s.layoutMode }),
-          ...(s.stageMode && { stageMode: s.stageMode }),
-          ...(s.motionBackground && { motionBackground: s.motionBackground }),
-          ...(s.globalSyncOffsetMs !== undefined && { globalSyncOffsetMs: s.globalSyncOffsetMs }),
-          ...(s.perTrackSyncOffset && { perTrackSyncOffset: { ...prev.perTrackSyncOffset, ...s.perTrackSyncOffset } }),
-          ...(s.backgroundStyle && { backgroundStyle: s.backgroundStyle }),
-          ...(s.showInstrumentalCountdown !== undefined && { showInstrumentalCountdown: s.showInstrumentalCountdown }),
-          ...(s.karaokeEffect && { karaokeEffect: s.karaokeEffect }),
-        }));
+        useLyricsSettings.setState((prev) => {
+          let mergedOffsets = { ...prev.perTrackSyncOffset, ...(s.perTrackSyncOffset || {}) };
+          let mergedTimestamps = { ...(prev.perTrackSyncOffsetUpdatedAt || {}) };
+          const keys = Object.keys(mergedOffsets);
+          if (keys.length > 200) {
+            const sortedKeys = keys.sort((a, b) => (mergedTimestamps[a] ?? 0) - (mergedTimestamps[b] ?? 0));
+            const excess = keys.length - 200;
+            for (let i = 0; i < excess; i++) {
+              delete mergedOffsets[sortedKeys[i]];
+              delete mergedTimestamps[sortedKeys[i]];
+            }
+          }
+
+          return {
+            ...prev,
+            ...(s.fontSize && { fontSize: s.fontSize }),
+            ...(s.lineHeight && { lineHeight: s.lineHeight }),
+            ...(s.fontFamily && { fontFamily: s.fontFamily }),
+            ...(s.contrast && { contrast: s.contrast }),
+            ...(s.blur && { blur: s.blur }),
+            ...(s.align && { align: s.align }),
+            ...(s.showAccentBar !== undefined && { showAccentBar: s.showAccentBar }),
+            ...(s.showRomanized !== undefined && { showRomanized: s.showRomanized }),
+            ...(s.layoutMode && { layoutMode: s.layoutMode }),
+            ...(s.stageMode && { stageMode: s.stageMode }),
+            ...(s.motionBackground && { motionBackground: s.motionBackground }),
+            ...(s.globalSyncOffsetMs !== undefined && { globalSyncOffsetMs: s.globalSyncOffsetMs }),
+            perTrackSyncOffset: mergedOffsets,
+            perTrackSyncOffsetUpdatedAt: mergedTimestamps,
+            ...(s.backgroundStyle && { backgroundStyle: s.backgroundStyle }),
+            ...(s.showInstrumentalCountdown !== undefined && { showInstrumentalCountdown: s.showInstrumentalCountdown }),
+            ...(s.karaokeEffect && { karaokeEffect: s.karaokeEffect }),
+          };
+        });
       }
     })
     .catch(() => {})
     .finally(() => {
-      // Delay disabling hydration flag to allow setState subscriber cycles to settle
-      setTimeout(() => {
-        isHydrating = false;
-      }, 100);
+      if (getUserId() === hydrationUserId) {
+        setTimeout(() => {
+          isHydrating = false;
+        }, 100);
+      }
     });
+}
+
+// Auto-sync lyrics preferences to/from backend
+if (typeof window !== 'undefined') {
+  hydrateCloudSettings(getUserId());
+
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'sway_account_id') {
+      const nextId = getUserId();
+      if (nextId !== currentActiveUserId) {
+        switchAccount(nextId);
+      }
+    }
+  });
+
+  window.addEventListener('sway:account_change', () => {
+    const nextId = getUserId();
+    if (nextId !== currentActiveUserId) {
+      switchAccount(nextId);
+    }
+  });
+
+  setInterval(() => {
+    const nextId = getUserId();
+    if (nextId !== currentActiveUserId) {
+      switchAccount(nextId);
+    }
+  }, 1000);
 
   let syncTimer: any = null;
   useLyricsSettings.subscribe((state) => {
     if (isHydrating) return;
+    const currentId = getUserId();
+    if (currentId !== currentActiveUserId) {
+      switchAccount(currentId);
+      return;
+    }
+
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = setTimeout(() => {
-      fetch(`/api/proxy/users/${getUserId()}/settings`, {
+      // Backend PATCH must use the current account ID at time of PATCH
+      const activeIdAtPatch = getUserId();
+      if (activeIdAtPatch !== currentActiveUserId) return;
+
+      fetch(`/api/proxy/users/${activeIdAtPatch}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

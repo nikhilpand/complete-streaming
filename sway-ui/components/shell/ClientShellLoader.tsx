@@ -11,6 +11,7 @@ import { ErrorBoundary } from './ErrorBoundary';
  */
 export function ClientShellLoader() {
   const [mounted, setMounted] = useState(false);
+  const [shellKey, setShellKey] = useState(0);
 
   useEffect(() => {
     setMounted(true);
@@ -21,8 +22,8 @@ export function ClientShellLoader() {
   }
 
   return (
-    <ErrorBoundary>
-      <ClientShell />
+    <ErrorBoundary onReset={() => setShellKey((k) => k + 1)} resetKey={shellKey}>
+      <ClientShell key={shellKey} />
     </ErrorBoundary>
   );
 }

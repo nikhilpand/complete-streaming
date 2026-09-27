@@ -7,8 +7,10 @@ import {
   invalidateLyricsCache,
   fetchLyricsWithCache,
   CACHE_VERSION,
+  CLIENT_ENGINE_VERSION,
   type CachedLyrics,
 } from '../lib/lyricsCache';
+import { ErrorBoundary } from '../components/shell/ErrorBoundary';
 
 describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', () => {
   beforeEach(() => {
@@ -130,6 +132,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
   test('FOUND cache entry expires after 20 minutes', () => {
     const foundEntry: CachedLyrics = {
       trackId: 'track_valid_abc',
+      recordingKey: 'rec_track_valid_abc',
       lines: [{ time: 1, endTime: 3, text: 'Hello world', words: [] }],
       provider: 'lrclib',
       syncQuality: 'LINE',
@@ -154,6 +157,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
   test('invalidateLyricsCache purges track specifically or entirely', () => {
     const entryA: CachedLyrics = {
       trackId: 'track_1',
+      recordingKey: 'rec_track_1',
       lines: [{ time: 1, endTime: 2, text: 'Line 1', words: [] }],
       provider: 'lrclib',
       syncQuality: 'LINE',
@@ -166,6 +170,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
     };
     const entryB: CachedLyrics = {
       trackId: 'track_2',
+      recordingKey: 'rec_track_2',
       lines: [{ time: 3, endTime: 4, text: 'Line 2', words: [] }],
       provider: 'lrclib',
       syncQuality: 'LINE',
@@ -391,5 +396,311 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
     assert.equal(plain?.synced, false);
     assert.equal(plain?.lines[0].time, -1);
     assert.equal(plain?.lines[0].text, 'Line one with timing');
+  });
+
+  test('rejects stale cache from previous engine version', () => {
+    const staleEntry: CachedLyrics = {
+      trackId: 'recording_a',
+      recordingKey: 'recording_a',
+      lines: [{ time: 10, endTime: 15, text: 'Sample line', words: [] }],
+      provider: 'musixmatch',
+      syncQuality: 'WORD',
+      provenance: null,
+      hasHindiScript: false,
+      status: 'FOUND',
+      cachedAt: Date.now(),
+      expiresAt: Date.now() + 100000,
+      engineVersion: 'v3',
+      synced: true,
+      hasWordTiming: true,
+    };
+
+    setCachedLyrics(staleEntry);
+
+    const res = getCachedLyrics('recording_a');
+    assert.equal(res, null, 'Stale engine version must return null');
+    assert.equal(getCachedLyrics('recording_a'), null, 'Stale entry must be purged from cache');
+  });
+
+  test('accepts synced cache only when engine version matches', () => {
+    const validEntry: CachedLyrics = {
+      trackId: 'recording_b',
+      recordingKey: 'recording_b',
+      lines: [{ time: 5, endTime: 9, text: 'Matching version line', words: [] }],
+      provider: 'musixmatch',
+      syncQuality: 'WORD',
+      provenance: null,
+      hasHindiScript: false,
+      status: 'FOUND',
+      cachedAt: Date.now(),
+      expiresAt: Date.now() + 100000,
+      engineVersion: 'v4',
+      synced: true,
+      hasWordTiming: true,
+    };
+
+    setCachedLyrics(validEntry);
+
+    const hit = getCachedLyrics('recording_b');
+    assert.ok(hit, 'Matching engine version must result in cache hit');
+    assert.equal(hit?.recordingKey, 'recording_b');
+    assert.equal(hit?.engineVersion, 'v4');
+  });
+
+  test('lyricsId is never used as recordingKey', async () => {
+    const origFetch = globalThis.fetch;
+    (globalThis as any).fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+      json: async () => ({
+        status: 'FOUND',
+        provider: 'jiosaavn',
+        lines: [{ time: 10, endTime: 14, text: 'Synced lyrics line without backend recordingKey' }],
+        syncQuality: 'LINE',
+      }),
+    });
+
+    try {
+      const res = await fetchLyricsWithCache({
+        title: 'Test Song',
+        lyricsId: 'lyrics-provider-123',
+      });
+
+      assert.equal(res.status, 'FOUND');
+      assert.equal(getCachedLyrics('lyrics-provider-123'), null);
+      assert.equal(getCachedLyrics('lyrics:lyrics-provider-123'), null);
+
+      const plainCandidate = getCachedLyrics(undefined, 'Test Song', '');
+      if (plainCandidate) {
+        assert.equal(plainCandidate.synced, false);
+        assert.equal(plainCandidate.syncQuality, 'NONE');
+        assert.equal(plainCandidate.lines[0].time, -1);
+      }
+
+      assert.equal(getCachedLyrics('rec:lyrics:lyrics-provider-123'), null);
+    } finally {
+      (globalThis as any).fetch = origFetch;
+    }
+  });
+
+  test('invalidation removes every alias', () => {
+    const entry: CachedLyrics = {
+      trackId: 'youtube:abc',
+      recordingKey: 'recording_hash_123',
+      lines: [{ time: 1, endTime: 3, text: 'Alias line', words: [] }],
+      provider: 'youtube',
+      syncQuality: 'LINE',
+      provenance: null,
+      hasHindiScript: false,
+      status: 'FOUND',
+      cachedAt: Date.now(),
+      expiresAt: Date.now() + 100000,
+      engineVersion: 'v4',
+      synced: true,
+    };
+
+    setCachedLyrics(entry, 'Alias Song', 'Alias Artist');
+
+    assert.ok(getCachedLyrics('youtube:abc'));
+    assert.ok(getCachedLyrics('recording_hash_123'));
+    assert.ok(getCachedLyrics(undefined, 'Alias Song', 'Alias Artist'));
+
+    invalidateLyricsCache('youtube:abc');
+
+    assert.equal(getCachedLyrics('youtube:abc'), null, 'Track cache must be gone');
+    assert.equal(getCachedLyrics('recording_hash_123'), null, 'RecordingKey cache must be gone');
+    assert.equal(getCachedLyrics(undefined, 'Alias Song', 'Alias Artist'), null, 'Plain alias must be gone');
+  });
+
+  test('in-flight request invalidated before completion cannot repopulate cache', async () => {
+    let fetchCount = 0;
+    let resolveFirstFetch!: (val: any) => void;
+    const waitingPromise = new Promise((resolve) => {
+      resolveFirstFetch = resolve;
+    });
+
+    const origFetch = globalThis.fetch;
+    (globalThis as any).fetch = async () => {
+      fetchCount++;
+      if (fetchCount === 1) {
+        await waitingPromise;
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+        json: async () => ({
+          status: 'FOUND',
+          identity: { recordingKey: 'rec_inflight_test' },
+          lines: [{ time: 1, endTime: 4, text: 'In flight line' }],
+          syncQuality: 'LINE',
+        }),
+      };
+    };
+
+    try {
+      const p1 = fetchLyricsWithCache({
+        songId: 'inflight_track',
+        title: 'Inflight Song',
+      });
+
+      invalidateLyricsCache('inflight_track');
+
+      resolveFirstFetch(null);
+      await p1;
+
+      assert.equal(getCachedLyrics('inflight_track'), null, 'Invalidated old result must not populate cache');
+      assert.equal(getCachedLyrics('rec_inflight_test'), null, 'Authoritative recording key must not be cached');
+
+      const p2 = await fetchLyricsWithCache({
+        songId: 'inflight_track',
+        title: 'Inflight Song',
+      });
+
+      assert.equal(fetchCount, 2, 'Second request must perform a fresh fetch');
+      assert.equal(p2.status, 'FOUND');
+    } finally {
+      (globalThis as any).fetch = origFetch;
+    }
+  });
+
+  test('confidence fallback preserves numeric 0 and uses nullish fallback', async () => {
+    const origFetch = globalThis.fetch;
+    (globalThis as any).fetch = async () => {
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+        json: async () => ({
+          status: 'FOUND',
+          identity: { recordingKey: 'rec_zero_confidence' },
+          confidence: 0,
+          lines: [{ time: 1, endTime: 2, text: 'Zero confidence lyrics' }],
+          syncQuality: 'LINE',
+        }),
+      };
+    };
+
+    try {
+      const res = await fetchLyricsWithCache({
+        songId: 'zero_confidence_track',
+        title: 'Zero Conf',
+      });
+
+      assert.equal(res.confidence, 0, 'Legitimate confidence of 0 must not fallback to 0.95');
+    } finally {
+      (globalThis as any).fetch = origFetch;
+    }
+  });
+
+  test('account-scoped settings persistence and hydration identity guard', async () => {
+    const { getSettingsStorageKey, switchAccount, hydrateCloudSettings, useLyricsSettings } = await import('../store/useLyricsSettings');
+
+    const origStorage = globalThis.localStorage;
+    const storeMap = new Map<string, string>();
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => storeMap.get(k) ?? null,
+      setItem: (k: string, v: string) => storeMap.set(k, v),
+      removeItem: (k: string) => storeMap.delete(k),
+    };
+
+    try {
+      localStorage.setItem('sway_account_id', 'user_alpha');
+      assert.equal(getSettingsStorageKey(), 'sway-lyrics-settings:user_alpha');
+
+      localStorage.setItem('sway_account_id', 'user_beta');
+      assert.equal(getSettingsStorageKey(), 'sway-lyrics-settings:user_beta');
+
+      let resolveAlpha!: (r: any) => void;
+      const alphaPromise = new Promise((resolve) => {
+        resolveAlpha = resolve;
+      });
+
+      const origFetch = globalThis.fetch;
+      (globalThis as any).fetch = async (url: string) => {
+        if (url.includes('user_alpha')) {
+          await alphaPromise;
+          return {
+            ok: true,
+            json: async () => ({
+              settings: { fontSize: 'sm', align: 'center' },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            settings: { fontSize: 'xl', align: 'left' },
+          }),
+        };
+      };
+
+      try {
+        localStorage.setItem('sway_account_id', 'user_alpha');
+        const hAlpha = hydrateCloudSettings('user_alpha');
+
+        localStorage.setItem('sway_account_id', 'user_beta');
+        switchAccount('user_beta');
+
+        resolveAlpha(null);
+        await hAlpha;
+
+        const currentSettings = useLyricsSettings.getState();
+        assert.notEqual(currentSettings.fontSize, 'sm', 'Account A settings must not survive or hydrate into Account B');
+      } finally {
+        (globalThis as any).fetch = origFetch;
+      }
+    } finally {
+      (globalThis as any).localStorage = origStorage;
+    }
+  });
+
+  test('perTrackSyncOffset is bounded to 200 entries and evicts least recently updated', async () => {
+    const { useLyricsSettings } = await import('../store/useLyricsSettings');
+
+    useLyricsSettings.getState().resetDefaults();
+
+    for (let i = 0; i < 200; i++) {
+      useLyricsSettings.getState().setTrackSyncOffset(`track_${i}`, i * 10);
+    }
+
+    assert.equal(Object.keys(useLyricsSettings.getState().perTrackSyncOffset).length, 200);
+
+    useLyricsSettings.getState().setTrackSyncOffset('track_0', 9999);
+    useLyricsSettings.getState().setTrackSyncOffset('track_200', 2000);
+
+    const offsets = useLyricsSettings.getState().perTrackSyncOffset;
+    assert.equal(Object.keys(offsets).length, 200, 'perTrackSyncOffset must remain capped at 200');
+    assert.ok(offsets['track_0'] !== undefined, 'track_0 was recently updated, so it must not be evicted');
+    assert.ok(offsets['track_200'] !== undefined, 'newly added track_200 must be present');
+    assert.equal(offsets['track_1'], undefined, 'oldest un-updated entry (track_1) must be evicted');
+  });
+
+  test('ErrorBoundary handleReset calls onReset before clearing error state', () => {
+    let resetCalled = false;
+    let resetOrder = 0;
+    let orderCounter = 0;
+
+    const boundary = new ErrorBoundary({
+      children: null,
+      onReset: () => {
+        resetCalled = true;
+        resetOrder = ++orderCounter;
+      },
+    });
+
+    (boundary as any).state = { hasError: true, error: new Error('test crash') };
+    (boundary as any).updater = {
+      enqueueSetState: (inst: any, partialState: any) => {
+        Object.assign(inst.state, partialState);
+      },
+    };
+
+    boundary.handleReset();
+
+    assert.equal(resetCalled, true, 'onReset must be called');
+    assert.equal(boundary.state.hasError, false, 'hasError must be reset to false');
+    assert.equal(resetOrder, 1, 'onReset must be invoked before error state is cleared');
   });
 });
