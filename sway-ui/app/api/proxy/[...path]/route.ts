@@ -63,23 +63,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       headers: getProxyHeaders(req),
       signal: AbortSignal.timeout(15000),
     });
-
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('audio') || contentType.includes('octet-stream')) {
-      const headers = new Headers();
-      headers.set('Content-Type', contentType);
-      const contentLength = res.headers.get('content-length');
-      if (contentLength) headers.set('Content-Length', contentLength);
-      const acceptRanges = res.headers.get('accept-ranges');
-      if (acceptRanges) headers.set('Accept-Ranges', acceptRanges);
-      const contentRange = res.headers.get('content-range');
-      if (contentRange) headers.set('Content-Range', contentRange);
-      return new NextResponse(res.body, {
-        status: res.status,
-        headers,
-      });
-    }
-
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch {
