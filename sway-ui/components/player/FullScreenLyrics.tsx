@@ -33,6 +33,9 @@ import type { RecommendationTrack } from '@/lib/api/types';
 import { Artwork } from '@/components/artwork/Artwork';
 import { artistNames } from '@/lib/utils';
 import type { LyricsTimingProvenance, LyricsSyncType } from '@/lib/lyrics-engine/types';
+import { KaraokeControls } from '@/components/player/KaraokeControls';
+import { useKaraokeStore } from '@/lib/karaoke/karaokeStore';
+import { karaokeEngine } from '@/lib/karaoke/KaraokeEngine';
 
 
 // ─── Format Time mm:ss ──────────────────────────────────────────────────
@@ -154,6 +157,26 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
 
   // Lyrics settings
   const lyricsSettings = useLyricsSettings();
+
+  // Wire karaoke engine to AudioManager events
+  const karaokeStatus = useKaraokeStore((s) => s.status);
+  const karaokeReady = useKaraokeStore((s) => s.ready);
+  const karaokeReset = useKaraokeStore((s) => s.reset);
+
+  useEffect(() => {
+    // When the current track changes, deactivate karaoke engine
+    karaokeReset();
+  }, [currentTrack?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!audioManager) return;
+    return audioManager.subscribe((ev) => {
+      if (!karaokeEngine?.isActive) return;
+      if (ev.type === 'play') karaokeEngine.play();
+      else if (ev.type === 'pause') karaokeEngine.pause();
+      else if (ev.type === 'ended') karaokeEngine.pause();
+    });
+  }, [karaokeStatus]);
 
   // Local UI states
   const [isLiked, setIsLiked] = useState(false);
@@ -1197,6 +1220,11 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
 
           {/* Desktop Controls (Apple Music Unified Balanced Row) */}
           {renderControlsRow(380)}
+
+          {/* Karaoke Controls */}
+          <div className="mt-3 w-full">
+            <KaraokeControls />
+          </div>
         </div>
       </div>
 
