@@ -376,8 +376,9 @@ export async function fetchLyricsWithCache(params: {
   }
 
   // 3. Network fetch
-  let fetchPromise!: Promise<CachedLyrics>;
-  fetchPromise = (async (): Promise<CachedLyrics> => {
+  let cleanupPromise: Promise<CachedLyrics> | null = null;
+  const fetchPromise: Promise<CachedLyrics> = (async (): Promise<CachedLyrics> => {
+    await Promise.resolve();
     try {
       if (!params.title || !params.title.trim()) {
         const notFoundDoc: CachedLyrics = {
@@ -625,12 +626,14 @@ export async function fetchLyricsWithCache(params: {
       setCachedLyrics(entry, params.title, params.artist);
       return entry;
     } finally {
-      if (inFlightRequests.get(inFlightKey) === fetchPromise) {
+      if (inFlightRequests.get(inFlightKey) === cleanupPromise) {
         inFlightRequests.delete(inFlightKey);
         inFlightPromiseGeneration.delete(inFlightKey);
       }
     }
   })();
+
+  cleanupPromise = fetchPromise;
 
   inFlightRequests.set(inFlightKey, fetchPromise);
   inFlightPromiseGeneration.set(inFlightKey, requestGeneration);

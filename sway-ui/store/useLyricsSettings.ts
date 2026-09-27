@@ -320,8 +320,8 @@ export function hydrateCloudSettings(targetUserId?: string): Promise<void> {
       if (data?.settings && typeof data.settings === 'object') {
         const s = data.settings;
         useLyricsSettings.setState((prev) => {
-          let mergedOffsets = { ...prev.perTrackSyncOffset, ...(s.perTrackSyncOffset || {}) };
-          let mergedTimestamps = { ...(prev.perTrackSyncOffsetUpdatedAt || {}) };
+          const mergedOffsets = { ...prev.perTrackSyncOffset, ...(s.perTrackSyncOffset || {}) };
+          const mergedTimestamps = { ...(prev.perTrackSyncOffsetUpdatedAt || {}) };
           const keys = Object.keys(mergedOffsets);
           if (keys.length > 200) {
             const sortedKeys = keys.sort((a, b) => (mergedTimestamps[a] ?? 0) - (mergedTimestamps[b] ?? 0));

@@ -18,6 +18,11 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
     // Reset global fetch mock if needed
   });
 
+  test('CACHE_VERSION and CLIENT_ENGINE_VERSION are correctly configured', () => {
+    assert.equal(CLIENT_ENGINE_VERSION, 'v4');
+    assert.equal(CACHE_VERSION, 'lyrics-v4');
+  });
+
   test('synced lyrics are strictly recording-keyed and do NOT leak across different tracks with same title/artist', () => {
     const trackASynced: CachedLyrics = {
       trackId: 'saavn:track_a',
