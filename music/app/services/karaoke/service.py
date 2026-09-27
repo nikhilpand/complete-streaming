@@ -113,26 +113,46 @@ async def _run_separation(
     await karaoke_cache.upsert(rec)
 
     tmp_audio = None
+    tmp_wav = None
     try:
         # Step 1: Download audio to temp file
         import httpx
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            async with client.stream("GET", stream_url) as response:
+            async with client.stream("GET", stream_url, headers={"User-Agent": "Mozilla/5.0"}) as response:
                 response.raise_for_status()
                 # Write to temp file preserving extension hint
-                suffix = ".mp3" if "mp3" in stream_url.lower() else ".m4a"
+                suffix = ".mp4" if ".mp4" in stream_url.lower() else (".mp3" if ".mp3" in stream_url.lower() else ".audio")
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
                     tmp_audio = f.name
                     async for chunk in response.aiter_bytes(chunk_size=65536):
                         f.write(chunk)
 
-        rec.progress = 0.30
+        rec.progress = 0.20
         await karaoke_cache.upsert(rec)
 
-        # Step 2: Run separation in thread (CPU-bound)
+        # Step 2: Convert to 16-bit 44.1kHz stereo PCM WAV so soundfile/libsndfile never fails
+        tmp_wav = tmp_audio.rsplit(".", 1)[0] + "_norm.wav"
+        import subprocess
+        cmd = [
+            "ffmpeg", "-y", "-i", tmp_audio,
+            "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+            tmp_wav
+        ]
+        await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        rec.progress = 0.35
+        await karaoke_cache.upsert(rec)
+
+        # Step 3: Run separation in thread (CPU-bound)
         stems = await asyncio.to_thread(
             sep_module.separate_stems,
-            tmp_audio,
+            tmp_wav,
             track_id,
         )
 
@@ -152,8 +172,9 @@ async def _run_separation(
             rec.progress = 0.0
             await karaoke_cache.upsert(rec)
     finally:
-        if tmp_audio and os.path.exists(tmp_audio):
-            try:
-                os.unlink(tmp_audio)
-            except OSError:
-                pass
+        for p in (tmp_audio, tmp_wav):
+            if p and os.path.exists(p):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass

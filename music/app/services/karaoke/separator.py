@@ -20,10 +20,8 @@ logger = logging.getLogger(__name__)
 MODELS_DIR = Path("data/models")
 STEMS_DIR = Path("data/karaoke")
 
-# Chosen model — Kim MelBand RoFormer (best vocal quality, MIT license compatible)
-# audio-separator model name: 'mel_band_roformer_kim_vocals.ckpt'
-# (available via audio-separator's bundled model zoo)
-DEFAULT_MODEL = "mel_band_roformer_kim_vocals_kj.ckpt"
+# Chosen model — Kimberley Jensen Vocal 2 (MDX-Net ONNX, fastest & high vocal fidelity)
+DEFAULT_MODEL = "Kim_Vocal_2.onnx"
 
 _separator = None
 _separator_available = False
@@ -48,11 +46,12 @@ def _try_load_separator():
         sep.load_model(model_filename=DEFAULT_MODEL)
         _separator = sep
         _separator_available = True
+        _separator_error = None
         logger.info("KaraokeEngine: audio-separator loaded model %s", DEFAULT_MODEL)
-    except ImportError:
+    except ImportError as e:
         _separator_error = (
-            "audio_separator is not installed. "
-            "Run: pip install audio-separator"
+            f"audio_separator or dependency missing: {e}. "
+            "Run: pip install audio-separator onnx onnx2torch"
         )
         logger.warning("KaraokeEngine: %s", _separator_error)
     except Exception as e:
@@ -60,15 +59,23 @@ def _try_load_separator():
         logger.warning("KaraokeEngine: %s", _separator_error)
 
 
-# Lazy-load: don't fail startup if model is unavailable
+# Initialize separator
 _try_load_separator()
 
 
+def get_separator():
+    global _separator
+    if _separator is None:
+        _try_load_separator()
+    return _separator
+
+
 def is_available() -> bool:
-    return _separator_available
+    return get_separator() is not None
 
 
 def get_error() -> Optional[str]:
+    get_separator()
     return _separator_error
 
 
@@ -79,11 +86,12 @@ def separate_stems(audio_path: str, output_prefix: str) -> dict[str, str]:
     Returns dict with keys 'vocals' and 'instrumental', values are absolute file paths.
     Raises RuntimeError if separator is not available or separation fails.
     """
-    if not _separator_available or _separator is None:
+    sep = get_separator()
+    if sep is None:
         raise RuntimeError(_separator_error or "Separator not available")
 
     logger.info("KaraokeEngine: separating %s", audio_path)
-    output_files = _separator.separate(audio_path)
+    output_files = sep.separate(audio_path)
     
     if not output_files or len(output_files) < 2:
         raise RuntimeError(f"Separation returned unexpected outputs: {output_files}")
@@ -93,17 +101,20 @@ def separate_stems(audio_path: str, output_prefix: str) -> dict[str, str]:
     vocals_path = None
     instrumental_path = None
     for f in output_files:
+        full_path = str((STEMS_DIR / f).resolve()) if not os.path.isabs(f) else str(Path(f).resolve())
         fname = os.path.basename(f).lower()
         if "vocal" in fname:
-            vocals_path = f
+            vocals_path = full_path
         elif "instrument" in fname or "no_vocals" in fname or "accompaniment" in fname:
-            instrumental_path = f
+            instrumental_path = full_path
 
     if not vocals_path or not instrumental_path:
         # Fallback: first=vocals, second=instrumental by convention
         if len(output_files) >= 2:
-            vocals_path = output_files[0]
-            instrumental_path = output_files[1]
+            f0 = str((STEMS_DIR / output_files[0]).resolve()) if not os.path.isabs(output_files[0]) else str(Path(output_files[0]).resolve())
+            f1 = str((STEMS_DIR / output_files[1]).resolve()) if not os.path.isabs(output_files[1]) else str(Path(output_files[1]).resolve())
+            vocals_path = f0
+            instrumental_path = f1
         else:
             raise RuntimeError(f"Cannot identify vocals/instrumental from: {output_files}")
 

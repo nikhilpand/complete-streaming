@@ -175,6 +175,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       if (ev.type === 'play') karaokeEngine.play();
       else if (ev.type === 'pause') karaokeEngine.pause();
       else if (ev.type === 'ended') karaokeEngine.pause();
+      else if (ev.type === 'timeupdate') karaokeEngine.syncIfDrifted(ev.currentTime);
     });
   }, [karaokeStatus]);
 

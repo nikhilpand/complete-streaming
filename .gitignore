@@ -91,3 +91,4 @@ test_screenshot.png
 # Karaoke stems and model weights
 data/karaoke/
 data/models/
+music/data/

@@ -106,6 +106,22 @@ class KaraokeEngineImpl {
     this.applyMuteMainAudio();
     if (mode !== 'original' && this.initialized) {
       this.syncToMainPlayer();
+      if (audioManager && !audioManager.paused) {
+        this.play();
+      }
+    } else if (mode === 'original') {
+      this.pause();
+    }
+  }
+
+  syncIfDrifted(mainTime: number): void {
+    if (!this.initialized || this.mode === 'original') return;
+    if (this.instrumentalNode) {
+      const diff = Math.abs(this.instrumentalNode.audio.currentTime - mainTime);
+      if (diff > 0.35) {
+        this.instrumentalNode.audio.currentTime = mainTime;
+        if (this.vocalsNode) this.vocalsNode.audio.currentTime = mainTime;
+      }
     }
   }
 

@@ -47,10 +47,5 @@ export async function pollKaraokeStatus(trackId: string): Promise<KaraokeInfo> {
 }
 
 export function getStemStreamUrl(trackId: string, stem: 'vocals' | 'instrumental'): string {
-  // Direct to backend (not proxied) for streaming efficiency
-  const backendBase =
-    typeof window !== 'undefined'
-      ? (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000')
-      : 'http://localhost:8000';
-  return `${backendBase}/api/v1/karaoke/${encodeURIComponent(trackId)}/stream/${stem}`;
+  return `/api/proxy/karaoke/${encodeURIComponent(trackId)}/stream/${stem}`;
 }
