@@ -20,7 +20,9 @@ export interface HomeFeedData {
 
 export async function getHomeFeed(signal?: AbortSignal): Promise<HomeFeedData> {
   const headers = typeof window !== 'undefined' ? getIdentityHeaders() : {};
-  return fetchApi<HomeFeedData>('/recommendations/home', {
+  // Backend mounts home router at /api/v1/home — alias /recommendations/home also works
+  // but the canonical path is /home
+  return fetchApi<HomeFeedData>('/home', {
     headers,
     signal,
   });

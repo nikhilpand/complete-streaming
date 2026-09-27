@@ -10,10 +10,12 @@ import {
   ChevronDown, Play, Pause, SkipBack, SkipForward,
   Shuffle, Repeat, Repeat1, Loader2, X, Music2, RotateCcw,
   Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles, Share2,
-  MessageSquareQuote, MoreHorizontal,
+  MessageSquareQuote, MoreHorizontal, Maximize2, Minimize2,
+  Disc3, Mic2, Sliders,
 } from 'lucide-react';
-import { parseLRC, findActiveIndex, type ParsedLyricLine } from '@/lib/lyric-parser';
-import { getProxiedImageUrl, fetchLyrics } from '@/lib/api';
+import { findActiveIndex, type ParsedLyricLine } from '@/lib/lyric-parser';
+import { getProxiedImageUrl } from '@/lib/api';
+import { getCachedLyrics, fetchLyricsWithCache } from '@/lib/lyricsCache';
 import { isDevanagari, devanagariToRoman } from '@/lib/transliteration';
 import Link from 'next/link';
 import {
@@ -21,8 +23,8 @@ import {
   getLyricsCSSVars,
   type LyricsLayoutMode,
   type LyricsBackgroundStyle,
+  type PlayerStageMode,
 } from '@/store/useLyricsSettings';
-import { LyricsSettingsPopover } from './LyricsSettingsPopover';
 import { DesktopLyricsProgressBar } from './lyrics/DesktopLyricsProgressBar';
 import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
 import { LyricShareCardModal } from './lyrics/LyricShareCardModal';
@@ -157,8 +159,26 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const [isLiked, setIsLiked] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [currentTickerLine, setCurrentTickerLine] = useState('');
   const [recommendations, setRecommendations] = useState<RecommendationTrack[]>([]);
   const [recsLoading, setRecsLoading] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullScreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }, []);
 
   const handleClose = useCallback(() => {
     if (onClose) {
@@ -226,6 +246,10 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       } else if (e.code === 'Space') {
         e.preventDefault();
         togglePlayPause();
+      } else if (e.key === 'f' || e.key === 'F') {
+        toggleFullScreen();
+      } else if (e.key === 'v' || e.key === 'V') {
+        lyricsSettings.cycleStageMode();
       } else if (e.key === 'm' || e.key === 'M') {
         setMuted(!isMuted);
       } else if (e.key === 'n' || e.key === 'N') {
@@ -261,14 +285,42 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     duration, isMuted, setMuted, isDrawerOpen, currentTrack?.id, (currentTrack as any)?.videoId, lyricsSettings,
   ]);
 
-  // --- Lyrics state ---
-  const [activeLyrics, setActiveLyrics] = useState<ParsedLyricLine[]>([]);
-  const [lyricsLoading, setLyricsLoading] = useState(false);
-  const [lyricsError, setLyricsError] = useState(false);
-  const [_lyricsProvider, setLyricsProvider] = useState<string>('');
-  const [lyricsSyncQuality, setLyricsSyncQuality] = useState<string>('LINE');
-  const [provenance, setProvenance] = useState<LyricsTimingProvenance | null>(null);
-  const [_hasHindiScript, setHasHindiScript] = useState<boolean>(false);
+  // --- Lyrics state — lazily initialized from client cache for instant reopening ---
+  const [activeLyrics, setActiveLyrics] = useState<ParsedLyricLine[]>(() => {
+    if (!rawTrack) return [];
+    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
+    return cached?.lines ?? [];
+  });
+  const [lyricsLoading, setLyricsLoading] = useState<boolean>(() => {
+    if (!rawTrack?.title) return false;
+    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
+    return !cached; // only show spinner if truly uncached
+  });
+  const [lyricsError, setLyricsError] = useState<boolean>(() => {
+    if (!rawTrack) return false;
+    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
+    return cached?.status === 'NOT_FOUND';
+  });
+  const [_lyricsProvider, setLyricsProvider] = useState<string>(() => {
+    if (!rawTrack) return '';
+    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
+    return cached?.provider ?? '';
+  });
+  const [lyricsSyncQuality, setLyricsSyncQuality] = useState<string>(() => {
+    if (!rawTrack) return 'LINE';
+    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
+    return cached?.syncQuality ?? 'LINE';
+  });
+  const [provenance, setProvenance] = useState<LyricsTimingProvenance | null>(() => {
+    if (!rawTrack) return null;
+    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
+    return cached?.provenance ?? null;
+  });
+  const [_hasHindiScript, setHasHindiScript] = useState<boolean>(() => {
+    if (!rawTrack) return false;
+    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
+    return cached?.hasHindiScript ?? false;
+  });
 
   // --- User Manual Scroll & Touch Handling ---
   const [isUserScrolling, setIsUserScrolling] = useState(false);
@@ -302,7 +354,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     return activeLyrics.some((l) => Array.isArray(l.words) && l.words.length > 0);
   }, [activeLyrics, provenance]);
 
-  // ── Fetch lyrics via Ultra Lyrics Engine ──
+  // ── Fetch lyrics via Ultra Lyrics Engine (cache-first) ──
   useEffect(() => {
     if (!currentTrack?.title) {
       setActiveLyrics([]);
@@ -311,6 +363,21 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       setHasHindiScript(false);
       return;
     }
+
+    // ── Fast path: cache is warm — apply immediately, skip all resets & network ──
+    const cached = getCachedLyrics(currentTrack.id, currentTrack.title, currentTrack.artist);
+    if (cached) {
+      setActiveLyrics(cached.lines);
+      setLyricsLoading(false);
+      setLyricsError(cached.status === 'NOT_FOUND');
+      setLyricsProvider(cached.provider);
+      setLyricsSyncQuality(cached.syncQuality);
+      setProvenance(cached.provenance);
+      setHasHindiScript(cached.hasHindiScript);
+      return; // ← no network call, no spinner, instant
+    }
+
+    // ── Slow path: cache miss — show spinner and fetch ──
     let cancelled = false;
     setLyricsLoading(true);
     setLyricsError(false);
@@ -335,98 +402,29 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
 
     const trackArtist = currentTrack.artist || currentTrack.subtitle || '';
     const trackDuration = currentTrack.duration || duration || 0;
-    const streamUrl = typeof window !== 'undefined' ? (audioManager as any)?.currentSrc : undefined;
 
-    fetchLyrics(
-      currentTrack.id,
-      currentTrack.title,
-      trackArtist,
-      currentTrack.album,
-      currentTrack.subtitle,
-      trackDuration,
-      currentTrack.lyricsId,
-      streamUrl
-    )
-      .then((data) => {
+    fetchLyricsWithCache({
+      songId: currentTrack.id,
+      title: currentTrack.title,
+      artist: trackArtist,
+      album: currentTrack.album,
+      subtitle: currentTrack.subtitle,
+      duration: trackDuration,
+      lyricsId: currentTrack.lyricsId,
+    })
+      .then((entry) => {
         if (cancelled) return;
-        if (data.provider) setLyricsProvider(data.provider);
-        if (data.syncQuality) setLyricsSyncQuality(data.syncQuality);
-        if (data.provenance) setProvenance(data.provenance);
+        setLyricsProvider(entry.provider);
+        setLyricsSyncQuality(entry.syncQuality);
+        setProvenance(entry.provenance);
+        setHasHindiScript(entry.hasHindiScript);
 
-        const isAuthenticWordSync = data.provenance
-          ? (data.provenance.isAuthenticTiming && (data.provenance.syncType === 'WORD' || data.provenance.syncType === 'SYLLABLE'))
-          : (data.syncQuality === 'WORD');
-
-        if (data.synced && data.lines && data.lines.length > 0) {
-          const parsedLines: ParsedLyricLine[] = data.lines.map((l: any) => {
-            const rawTime = (l.startMs !== undefined && l.startMs !== null) ? l.startMs / 1000 : (l.time ?? 0);
-            const rawEndTime = (l.endMs !== undefined && l.endMs !== null) ? l.endMs / 1000 : (l.endTime ?? (rawTime + 3));
-            const rawText = l.original || l.text || '';
-            const rawWords = (isAuthenticWordSync && Array.isArray(l.words) && l.words.length > 0)
-              ? l.words.map((w: any) => ({
-                  text: w.text,
-                  startTime: (w.startMs !== undefined && w.startMs !== null) ? w.startMs / 1000 : (w.startTime ?? 0),
-                  endTime: (w.endMs !== undefined && w.endMs !== null) ? w.endMs / 1000 : (w.endTime ?? 0),
-                  romanized: w.romanized,
-                }))
-              : [];
-
-            return {
-              time: rawTime,
-              endTime: rawEndTime,
-              text: rawText,
-              romanized: l.romanized || (isDevanagari(rawText) ? devanagariToRoman(rawText) : undefined),
-              words: rawWords,
-              isInstrumental: Boolean(l.isInstrumental),
-            };
-          });
-          setActiveLyrics(parsedLines);
-          if (data.isDevanagari || parsedLines.some(l => isDevanagari(l.text))) {
-            setHasHindiScript(true);
-          }
-        } else if (data.synced && data.lrc) {
-          const parsed = parseLRC(data.lrc);
-          const enriched = parsed.map((l) => ({
-            ...l,
-            words: [], // Pure line sync: no fake words
-            romanized: isDevanagari(l.text) ? devanagariToRoman(l.text) : undefined,
-          }));
-          setActiveLyrics(enriched.length > 0 ? enriched : []);
-          if (enriched.some(l => isDevanagari(l.text))) {
-            setHasHindiScript(true);
-          }
-          if (enriched.length === 0 && !data.plain) setLyricsError(true);
-        } else if (data.plain || (data.lines && data.lines.length > 0)) {
-          setLyricsSyncQuality('NONE');
-          setProvenance({
-            syncType: 'NONE',
-            timingProvenance: 'PLAIN',
-            timingSource: 'unknown',
-            isAuthenticTiming: false,
-            matchConfidence: 0,
-            timingConfidence: 0,
-            acousticConfidence: 0,
-            overallConfidence: 0,
-            confidence: 0,
-          });
-          const plainLines: string[] = data.plain
-            ? data.plain.split('\n').map((l: string) => l.trim()).filter(Boolean)
-            : (data.lines || []).map((l: any) => (l.original || l.text || '').trim()).filter(Boolean);
-
-          const unSyncedLines: ParsedLyricLine[] = plainLines.map((text: string) => ({
-            time: -1,
-            endTime: -1,
-            text,
-            romanized: isDevanagari(text) ? devanagariToRoman(text) : undefined,
-            words: [],
-            isInstrumental: false,
-          }));
-          setActiveLyrics(unSyncedLines);
-          if (unSyncedLines.some(l => isDevanagari(l.text))) {
-            setHasHindiScript(true);
-          }
-        } else {
+        if (entry.status === 'NOT_FOUND' || entry.lines.length === 0) {
           setLyricsError(true);
+          setActiveLyrics([]);
+        } else {
+          setActiveLyrics(entry.lines);
+          setLyricsError(false);
         }
       })
       .catch(() => { if (!cancelled) setLyricsError(true); })
@@ -707,6 +705,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           }
 
           lastActiveIdx.current = idx;
+          const currentLine = (idx >= 0 && idx < activeLyrics.length) ? (activeLyrics[idx]?.text || '') : '';
+          setCurrentTickerLine(currentLine);
         }
 
         // Update scroll target (only when user is not manually scrolling)
@@ -797,186 +797,455 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   // Generate CSS styles from lyrics settings
   const customCSSVars = getLyricsCSSVars(lyricsSettings);
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.982 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.982 }}
-      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      className={`better-lyrics-page blyrics-layout-${lyricsSettings.layoutMode || 'split'} blyrics-bg-${lyricsSettings.backgroundStyle || 'wash'} ${lyricsSettings.showAccentBar ? 'blyrics-accent-bar' : ''} ${lyricsSettings.align === 'center' ? 'blyrics-align-center' : ''}`}
+  const stageMode = lyricsSettings.stageMode || 'apple';
+
+  const renderArtwork = (maxSize: number = 380, roundedClass: string = 'rounded-[22px]') => (
+    <div
+      className={`album-art shrink-0 overflow-hidden relative group w-full aspect-square ${roundedClass}`}
       style={{
-        background: bgMain,
-        '--blyrics-background-img': coverUrl ? `url("${coverUrl}")` : 'none',
-        ...customCSSVars,
-      } as React.CSSProperties}
+        maxWidth: `${maxSize}px`,
+        boxShadow: '0 32px 80px -12px rgba(var(--art-r, 0), var(--art-g, 0), var(--art-b, 0), 0.5)'
+      }}
     >
-      {/* Apple Music Fluid Multi-Layer Rotating Artwork Background */}
-      <div className="blyrics-fluid-canvas" aria-hidden="true">
-        <div className="blyrics-fluid-layer blyrics-fluid-layer-1" />
-        <div className="blyrics-fluid-layer blyrics-fluid-layer-2" />
-        <div className="blyrics-fluid-layer blyrics-fluid-layer-3" />
-        <div className="blyrics-fluid-layer blyrics-fluid-layer-4" />
-      </div>
-
-      {/* ── Minimal Unobtrusive Close & Settings (Apple Music style) ── */}
-      <div className="hidden lg:flex absolute top-6 right-8 z-[2000] items-center gap-2">
-        <LyricsSettingsPopover currentTrackId={currentTrack.id || (currentTrack as any).videoId} />
-        <button
-          type="button"
-          onClick={handleClose}
-          aria-label="Close lyrics"
-          className="w-9 h-9 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-          title="Close (Esc)"
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.div
+          key={currentTrack.id}
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.95, opacity: 0 }}
+          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full h-full"
         >
-          <X size={20} />
-        </button>
-      </div>
+          <Artwork
+            src={coverUrl}
+            alt={currentTrack.title}
+            size={500}
+            className={`w-full h-full object-cover select-none ${roundedClass}`}
+          />
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
 
-      {/* Side Panel: Album Art, Metadata & Controls */}
-      <div className="blyrics-side-panel">
-        <div className="w-full max-w-[380px] flex flex-col gap-4">
-          {/* Mobile Back Button */}
+  const renderMetadata = (isLarge: boolean = false) => (
+    <div className="track-info min-w-0 w-full text-center flex flex-col items-center">
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentTrack.id}
+          initial={{ opacity: 0, y: 7 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -7 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          className="flex flex-col items-center w-full"
+        >
+          <div className="flex items-center justify-center gap-3 w-full">
+            <h1
+              className={`title select-text truncate font-bold text-white tracking-tight ${
+                isLarge ? 'text-[28px] max-w-[440px]' : 'text-[26px] max-w-[360px]'
+              }`}
+              title={currentTrack.title}
+            >
+              {currentTrack.title}
+            </h1>
+            <button
+              onClick={toggleLike}
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+            >
+              <Heart size={20} className={isLiked ? 'fill-white text-white' : 'text-white/60'} />
+            </button>
+          </div>
+          <p
+            className={`artist truncate mt-1 font-medium text-white/60 tracking-normal w-full ${
+              isLarge ? 'text-[15px] max-w-[440px]' : 'text-[15px] max-w-[360px]'
+            }`}
+          >
+            {currentTrack.artist}{currentTrack.album ? ` - ${currentTrack.album}` : ''}
+          </p>
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+
+  const renderControlsRow = (maxWidth: number = 380) => (
+    <div
+      className="hidden lg:flex items-center justify-between w-full px-1 text-white select-none"
+      style={{ maxWidth: `${maxWidth}px` }}
+    >
+      {/* Left: Volume with hover slider & Up Next More button */}
+      <div className="flex items-center gap-1.5">
+        <div className="relative flex items-center group/vol">
           <button
-            onClick={handleClose}
-            aria-label="Back to player"
-            className="lg:hidden w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-white/10 cursor-pointer active:scale-95 mb-1"
+            type="button"
+            onClick={() => setMuted(!isMuted)}
+            aria-label={isMuted ? 'Unmute' : 'Mute'}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors cursor-pointer"
+            title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
           >
-            <ChevronDown size={20} color="white" />
+            {isMuted || volume === 0 ? (
+              <VolumeX size={17} />
+            ) : volume < 0.5 ? (
+              <Volume1 size={17} />
+            ) : (
+              <Volume2 size={17} />
+            )}
           </button>
-
-          {/* Album Artwork */}
-          <motion.div
-            initial={{ scale: 0.94, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="album-art shrink-0 overflow-hidden relative group"
-          >
-            <Artwork
-              src={coverUrl}
-              alt={currentTrack.title}
-              size={500}
-              className="w-full h-full object-cover select-none"
-            />
-          </motion.div>
-
-          {/* Track Title, Artist, and Favorite/More */}
-          <div className="track-info min-w-0 w-full">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <h1 className="title select-text truncate" title={currentTrack.title}>
-                  {currentTrack.title}
-                </h1>
-                <p className="artist truncate mt-1">
-                  {currentTrack.artist}{currentTrack.album ? ` — ${currentTrack.album}` : ''}
-                </p>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <span className="text-[11px] font-medium tracking-wide text-white/45">
-                    Dolby Atmos
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                <button
-                  type="button"
-                  onClick={toggleLike}
-                  aria-label={isLiked ? 'Unlike track' : 'Like track'}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-                  title={isLiked ? 'Liked' : 'Favorite'}
-                >
-                  <Heart
-                    size={17}
-                    className={isLiked ? 'fill-rose-500 text-rose-500' : 'text-white/60 hover:text-white'}
-                  />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsDrawerOpen((prev) => !prev)}
-                  aria-label="Up next queue"
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-                  title="Up Next"
-                >
-                  <MoreHorizontal size={17} className="text-white/60 hover:text-white" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Desktop Progress Seek Bar (isolated re-renders) ── */}
-          <DesktopLyricsProgressBar duration={duration} seekTo={seekTo} />
-
-          {/* ── Desktop Floating Vector Controls (Apple Music style) ── */}
-          <div className="hidden lg:flex blyrics-controls-pill w-full">
-            <button type="button" onClick={toggleShuffle} aria-label="Shuffle" title={shuffle ? 'Shuffle On' : 'Shuffle Off'}>
-              <Shuffle size={18} color={shuffle ? 'white' : 'rgba(255,255,255,0.42)'} strokeWidth={shuffle ? 2.5 : 1.8} />
-            </button>
-
-            <button type="button" onClick={skipPrev} aria-label="Previous" title="Previous (P)">
-              <SkipBack size={22} fill="white" color="white" />
-            </button>
-
-            <button
-              type="button"
-              onClick={togglePlayPause}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-              className="blyrics-play-btn"
-              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-            >
-              {isLoading ? (
-                <Loader2 size={24} className="animate-spin text-white" />
-              ) : isPlaying ? (
-                <Pause size={26} fill="white" color="white" />
-              ) : (
-                <Play size={26} fill="white" color="white" className="ml-0.5" />
-              )}
-            </button>
-
-            <button type="button" onClick={skipNext} aria-label="Next" title="Next (N)">
-              <SkipForward size={22} fill="white" color="white" />
-            </button>
-
-            <button type="button" onClick={cycleRepeat} aria-label="Repeat mode" title={`Repeat: ${repeat}`}>
-              {repeat === 'one' ? (
-                <Repeat1 size={18} color="white" strokeWidth={2.5} />
-              ) : (
-                <Repeat size={18} color={repeat === 'off' ? 'rgba(255,255,255,0.42)' : 'white'} strokeWidth={repeat === 'off' ? 1.8 : 2.5} />
-              )}
-            </button>
-          </div>
-
-          {/* Desktop Volume & Mute Control */}
-          <div className="hidden lg:flex items-center gap-3 w-full text-white/60 px-0.5">
-            <button
-              type="button"
-              onClick={() => setMuted(!isMuted)}
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-              className="hover:text-white transition-colors cursor-pointer shrink-0"
-              title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
-            >
-              {isMuted || volume === 0 ? (
-                <VolumeX size={16} />
-              ) : volume < 0.5 ? (
-                <Volume1 size={16} />
-              ) : (
-                <Volume2 size={16} />
-              )}
-            </button>
+          <div className="w-0 group-hover/vol:w-16 transition-all duration-200 overflow-hidden flex items-center">
             <input
               type="range"
               min={0}
               max={1}
               step={0.02}
               value={isMuted ? 0 : volume}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                setVolume(val);
-              }}
-              className="blyrics-volume-slider"
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              className="w-16 h-1 accent-white cursor-pointer ml-1"
               aria-label="Volume level"
             />
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setIsDrawerOpen((prev) => !prev)}
+          aria-label="Up next queue"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer"
+          title="Up Next"
+        >
+          <MoreHorizontal size={17} />
+        </button>
       </div>
+
+      {/* Center: Shuffle, Prev, Play/Pause, Next, Repeat */}
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={toggleShuffle}
+          aria-label="Shuffle"
+          className="w-7 h-7 flex items-center justify-center cursor-pointer transition-colors"
+          title={shuffle ? 'Shuffle On' : 'Shuffle Off'}
+        >
+          <Shuffle size={15} className={shuffle ? 'text-white' : 'text-white/35 hover:text-white/70'} />
+        </button>
+
+        <button
+          type="button"
+          onClick={skipPrev}
+          aria-label="Previous"
+          className="w-9 h-9 flex items-center justify-center text-white hover:scale-110 active:scale-95 transition-transform cursor-pointer"
+          title="Previous (P)"
+        >
+          <SkipBack size={21} fill="white" color="white" />
+        </button>
+
+        <button
+          type="button"
+          onClick={togglePlayPause}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+          className="w-12 h-12 rounded-full flex items-center justify-center text-white hover:scale-108 active:scale-95 transition-transform cursor-pointer"
+          title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+        >
+          {isLoading ? (
+            <Loader2 size={24} className="animate-spin text-white" />
+          ) : isPlaying ? (
+            <Pause size={28} fill="white" color="white" />
+          ) : (
+            <Play size={28} fill="white" color="white" className="ml-0.5" />
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={skipNext}
+          aria-label="Next"
+          className="w-9 h-9 flex items-center justify-center text-white hover:scale-110 active:scale-95 transition-transform cursor-pointer"
+          title="Next (N)"
+        >
+          <SkipForward size={21} fill="white" color="white" />
+        </button>
+
+        <button
+          type="button"
+          onClick={cycleRepeat}
+          aria-label="Repeat mode"
+          className="w-7 h-7 flex items-center justify-center cursor-pointer transition-colors"
+          title={`Repeat: ${repeat}`}
+        >
+          {repeat === 'one' ? (
+            <Repeat1 size={15} className="text-white" />
+          ) : (
+            <Repeat size={15} className={repeat === 'off' ? 'text-white/35 hover:text-white/70' : 'text-white'} />
+          )}
+        </button>
+      </div>
+
+      {/* Right: Heart & Lyric Quote */}
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={toggleLike}
+          aria-label={isLiked ? 'Unlike track' : 'Like track'}
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer"
+          title={isLiked ? 'Liked' : 'Favorite'}
+        >
+          <Heart
+            size={17}
+            className={isLiked ? 'fill-rose-500 text-rose-500' : 'text-white/50 hover:text-white'}
+          />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsShareModalOpen(true)}
+          aria-label="Create lyrics quote card"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer"
+          title="Lyric Quote"
+        >
+          <MessageSquareQuote size={17} />
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.982 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.982 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      className={`better-lyrics-page pt-12 md:pt-0 stage-mode-${stageMode} blyrics-layout-${lyricsSettings.layoutMode || 'split'} blyrics-bg-${lyricsSettings.backgroundStyle || 'wash'} ${lyricsSettings.showAccentBar ? 'blyrics-accent-bar' : ''} ${lyricsSettings.align === 'center' ? 'blyrics-align-center' : ''}`}
+      style={{
+        background: `
+          radial-gradient(circle at 0% 0%, hsla(var(--art-h, 215), var(--art-s, 60%), 35%, 0.4) 0%, transparent 50%),
+          radial-gradient(circle at 100% 100%, hsla(var(--art-h, 215), var(--art-s, 40%), 20%, 0.4) 0%, transparent 60%),
+          #0a0a0f
+        `,
+        '--blyrics-background-img': coverUrl ? `url("${coverUrl}")` : 'none',
+        ...customCSSVars,
+      } as React.CSSProperties}
+    >
+      {/* Apple Music Authentic Multi-Layer Fluid Artwork Background */}
+      <div className={`blyrics-fluid-canvas ${lyricsSettings.motionBackground === 'static' ? 'motion-static' : ''}`} aria-hidden="true">
+        <div className="blyrics-fluid-layer blyrics-fluid-layer-1" />
+        <div className="blyrics-fluid-layer blyrics-fluid-layer-2" />
+        <div className="blyrics-fluid-layer blyrics-fluid-layer-3" />
+      </div>
+
+      {/* ── Desktop Top Controls (Screens >= lg) ── */}
+      <div className="hidden lg:flex absolute top-7 right-8 z-[2000] items-center gap-2">
+        {/* 3-Pill Mode Switcher: Apple | Vinyl | Cinema */}
+        <div className="flex items-center bg-white/10 backdrop-blur-md rounded-full p-1 border border-white/15 shadow-lg">
+          <button
+            type="button"
+            onClick={() => lyricsSettings.setStageMode('apple')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+              stageMode === 'apple'
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/50 hover:text-white hover:bg-white/10'
+            }`}
+            title="Apple Music 2-Column Split Mode (V to cycle)"
+          >
+            <Music2 size={13} />
+            <span>Apple</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => lyricsSettings.setStageMode('vinyl')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+              stageMode === 'vinyl'
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/50 hover:text-white hover:bg-white/10'
+            }`}
+            title="Vinyl Artwork Immersion Mode (V to cycle)"
+          >
+            <Disc3 size={13} />
+            <span>Vinyl</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => lyricsSettings.setStageMode('cinema')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+              stageMode === 'cinema'
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/50 hover:text-white hover:bg-white/10'
+            }`}
+            title="Cinema Sing Focus Mode (V to cycle)"
+          >
+            <Mic2 size={13} />
+            <span>Cinema</span>
+          </button>
+        </div>
+
+        {/* Direct Settings Link */}
+        <Link
+          href="/settings"
+          onClick={handleClose}
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          title="Settings & Audio Calibration"
+          aria-label="Settings"
+        >
+          <Sliders size={15} />
+        </Link>
+
+        <button
+          type="button"
+          onClick={toggleFullScreen}
+          aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          title={isFullscreen ? 'Exit Full Screen (F)' : 'Full Screen (F)'}
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </button>
+        <button
+          type="button"
+          onClick={handleClose}
+          aria-label="Close lyrics"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          title="Close (Esc)"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      {/* ── Mobile Top Header (Screens < lg): Back Button, Mode Switcher, Settings ── */}
+      <div className="flex lg:hidden absolute top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 right-3 z-[2000] items-center justify-between pointer-events-auto">
+        {/* Back / Close button */}
+        <button
+          type="button"
+          onClick={handleClose}
+          aria-label="Close player"
+          className="w-9 h-9 rounded-full flex items-center justify-center bg-black/40 backdrop-blur-xl border border-white/15 text-white shadow-md active:scale-95 transition-transform cursor-pointer"
+        >
+          <ChevronDown size={20} />
+        </button>
+
+        {/* Mobile Stage Mode Switcher (Apple | Vinyl | Cinema) */}
+        <div className="flex items-center bg-black/40 backdrop-blur-xl rounded-full p-1 border border-white/15 shadow-md">
+          <button
+            type="button"
+            onClick={() => lyricsSettings.setStageMode('apple')}
+            className={`flex items-center justify-center w-8 h-7 rounded-full transition-all cursor-pointer ${
+              stageMode === 'apple'
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/50 hover:text-white'
+            }`}
+            title="Apple Music Mode"
+            aria-label="Apple Music Mode"
+          >
+            <Music2 size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => lyricsSettings.setStageMode('vinyl')}
+            className={`flex items-center justify-center w-8 h-7 rounded-full transition-all cursor-pointer ${
+              stageMode === 'vinyl'
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/50 hover:text-white'
+            }`}
+            title="Vinyl Artwork Mode"
+            aria-label="Vinyl Artwork Mode"
+          >
+            <Disc3 size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => lyricsSettings.setStageMode('cinema')}
+            className={`flex items-center justify-center w-8 h-7 rounded-full transition-all cursor-pointer ${
+              stageMode === 'cinema'
+                ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
+                : 'text-white/50 hover:text-white'
+            }`}
+            title="Cinema Sing Mode"
+            aria-label="Cinema Sing Mode"
+          >
+            <Mic2 size={14} />
+          </button>
+        </div>
+
+        {/* Right: Settings & Up Next */}
+        <div className="flex items-center gap-1.5">
+          <Link
+            href="/settings"
+            onClick={handleClose}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-black/40 backdrop-blur-xl border border-white/15 text-white/70 hover:text-white shadow-md active:scale-95 transition-all cursor-pointer"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <Sliders size={15} />
+          </Link>
+          <button
+            type="button"
+            onClick={() => setIsDrawerOpen((prev) => !prev)}
+            aria-label="Up next queue"
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-black/40 backdrop-blur-xl border border-white/15 text-white/70 hover:text-white shadow-md active:scale-95 transition-all cursor-pointer"
+            title="Up Next"
+          >
+            <ListMusic size={15} />
+          </button>
+        </div>
+      </div>
+
+      {/* Side Panel: Album Art, Centered Metadata & Clean Controls (Apple Mode) */}
+      <div className="blyrics-side-panel">
+        <div className="w-full max-w-[380px] flex flex-col items-center gap-5">
+          {/* Album Artwork */}
+          {renderArtwork(380, 'rounded-[22px]')}
+
+          {/* Track Title and Artist (Centered like Apple Music) */}
+          {renderMetadata(false)}
+
+          {/* Desktop Progress Seek Bar (Inline with time on left and right) */}
+          <DesktopLyricsProgressBar duration={duration} seekTo={seekTo} />
+
+          {/* Desktop Controls (Apple Music Unified Balanced Row) */}
+          {renderControlsRow(380)}
+        </div>
+      </div>
+
+      {/* ── Mode 2: Vinyl / Artwork Immersion Stage View ── */}
+      {stageMode === 'vinyl' && (
+        <div className="stage-vinyl-view">
+          {/* Large Artwork with Halo Glow */}
+          <div className="relative group w-full max-w-[390px] aspect-square rounded-[26px] overflow-hidden mb-6 shadow-2xl flex items-center justify-center">
+            <div
+              className="stage-vinyl-glow"
+              style={{ background: 'hsla(var(--art-h, 215), var(--art-s, 60%), 50%, 0.45)' }}
+            />
+            {renderArtwork(390, 'rounded-[26px]')}
+          </div>
+
+          {/* Centered Metadata */}
+          {renderMetadata(true)}
+
+          {/* Centered Seek Progress Bar */}
+          <div className="w-full max-w-[420px] mt-4 mb-2">
+            <DesktopLyricsProgressBar duration={duration} seekTo={seekTo} className="max-w-[420px]" />
+          </div>
+
+          {/* Centered Controls Row */}
+          <div className="w-full max-w-[420px] mb-4">
+            {renderControlsRow(420)}
+          </div>
+
+          {/* 1-Line Real-Time Lyric Ticker Subtitle */}
+          <div className="w-full max-w-[460px] min-h-[34px] flex items-center justify-center text-center">
+            <AnimatePresence mode="wait">
+              <motion.p
+                key={currentTickerLine || 'empty-ticker'}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="text-sm lg:text-base font-medium text-white/85 tracking-wide truncate px-4"
+              >
+                {currentTickerLine ? (
+                  <span>{currentTickerLine}</span>
+                ) : (
+                  <span className="text-white/35 text-xs italic">♪ Instrumental or listening</span>
+                )}
+              </motion.p>
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
 
       {/* Lyrics Display Panel (Supports Wheel + Touch Drag Scrolling) */}
       <div
@@ -1042,18 +1311,85 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Iconic Apple Music Lyric Quote Bubble Button */}
-        <button
-          type="button"
-          onClick={() => setIsShareModalOpen(true)}
-          aria-label="Create lyrics quote card"
-          className="hidden lg:flex blyrics-quote-bubble-btn"
-          title="Create Lyric Quote Card"
-        >
-          <MessageSquareQuote size={20} />
-        </button>
       </div>
+
+      {/* ── Mode 3: Cinema Floating Bottom Dock ── */}
+      {stageMode === 'cinema' && (
+        <div className="hidden lg:flex stage-cinema-dock">
+          {/* Mini Artwork + Meta */}
+          <div className="flex items-center gap-3 min-w-0 pr-3 border-r border-white/10 max-w-[220px]">
+            <Artwork
+              src={coverUrl}
+              alt={currentTrack.title}
+              size={38}
+              className="w-[38px] h-[38px] rounded-lg object-cover shrink-0"
+            />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-white truncate">{currentTrack.title}</p>
+              <p className="text-[11px] text-white/60 truncate">{currentTrack.artist}</p>
+            </div>
+          </div>
+
+          {/* Mini Controls */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={skipPrev}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              title="Previous (P)"
+            >
+              <SkipBack size={16} fill="white" />
+            </button>
+            <button
+              type="button"
+              onClick={togglePlayPause}
+              className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-transform cursor-pointer"
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+            >
+              {isLoading ? (
+                <Loader2 size={18} className="animate-spin text-black" />
+              ) : isPlaying ? (
+                <Pause size={18} fill="black" />
+              ) : (
+                <Play size={18} fill="black" className="ml-0.5" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={skipNext}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              title="Next (N)"
+            >
+              <SkipForward size={16} fill="white" />
+            </button>
+          </div>
+
+          {/* Mini Progress */}
+          <div className="w-48 pl-2">
+            <DesktopLyricsProgressBar duration={duration} seekTo={seekTo} className="max-w-[190px]" />
+          </div>
+
+          {/* Like & Up next */}
+          <div className="flex items-center gap-1 pl-2 border-l border-white/10">
+            <button
+              type="button"
+              onClick={toggleLike}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors cursor-pointer"
+              title={isLiked ? 'Liked' : 'Favorite'}
+            >
+              <Heart size={15} className={isLiked ? 'fill-rose-500 text-rose-500' : ''} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsDrawerOpen((prev) => !prev)}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors cursor-pointer"
+              title="Up Next"
+            >
+              <ListMusic size={15} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Mobile Bottom Controls & Mini Seek (Placed OUTSIDE masked panel) ── */}
       <MobileLyricsControls
@@ -1212,3 +1548,4 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     </motion.div>
   );
 }
+

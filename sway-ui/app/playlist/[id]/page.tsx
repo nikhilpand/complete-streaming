@@ -33,37 +33,37 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
   if (error) return <div className="flex items-center justify-center h-screen"><ErrorState message={error} onRetry={load} /></div>;
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10">
-      <div className="flex gap-8 items-end mb-10">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-10">
+      <div className="flex flex-col sm:flex-row items-center sm:items-end gap-6 sm:gap-8 mb-8 sm:mb-10 text-center sm:text-left">
         {loading ? (
           <>
-            <Skeleton className="w-52 h-52 rounded-[--radius-2xl] flex-shrink-0" />
-            <div className="space-y-3 flex-1">
-              <Skeleton className="h-3 w-20" /><Skeleton className="h-12 w-64" />
+            <Skeleton className="w-44 h-44 sm:w-52 sm:h-52 rounded-[--radius-2xl] flex-shrink-0" />
+            <div className="space-y-3 flex-1 w-full flex flex-col items-center sm:items-start">
+              <Skeleton className="h-3 w-20" /><Skeleton className="h-10 sm:h-12 w-3/4 max-w-sm" />
               <Skeleton className="h-4 w-40" />
-              <div className="flex gap-3 pt-2"><Skeleton className="h-10 w-24" /><Skeleton className="h-10 w-28" /></div>
+              <div className="flex gap-3 pt-2 justify-center sm:justify-start"><Skeleton className="h-10 w-24" /><Skeleton className="h-10 w-28" /></div>
             </div>
           </>
         ) : playlist ? (
           <>
-            <div className="w-52 h-52 rounded-[--radius-2xl] overflow-hidden flex-shrink-0 shadow-2xl bg-[--surface-elevated]">
+            <div className="w-44 h-44 sm:w-52 sm:h-52 rounded-[--radius-2xl] overflow-hidden flex-shrink-0 shadow-2xl bg-[--surface-elevated]">
               <Artwork src={playlist.artwork_url} alt={playlist.title} size={208} className="w-full h-full object-cover" />
             </div>
-            <div className="min-w-0 space-y-2">
+            <div className="min-w-0 space-y-2 w-full">
               <p className="text-[10px] text-[--muted] uppercase tracking-widest font-mono">Playlist</p>
-              <h1 className="text-4xl font-bold text-[--foreground] tracking-tight leading-tight">{playlist.title}</h1>
-              {playlist.owner && <p className="text-[--muted] text-sm">{playlist.owner}</p>}
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-[--foreground] tracking-tight leading-tight truncate">{playlist.title}</h1>
+              {playlist.owner && <p className="text-[--muted] text-sm truncate">{playlist.owner}</p>}
               <p className="text-sm text-[--muted]">
                 {playlist.song_count ?? songs.length} tracks
                 {playlist.follower_count ? ` · ${formatCount(playlist.follower_count)} saves` : ''}
               </p>
-              <div className="flex gap-3 pt-2">
+              <div className="flex flex-wrap justify-center sm:justify-start gap-3 pt-2">
                 <button
                   onClick={() => {
                     setQueue(songs, 0);
                     setCurrentTrack(songs[0]);
                   }}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-[--foreground] text-[--surface] rounded-[--radius-md] text-sm font-semibold hover:opacity-90 transition-opacity"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-[--foreground] text-[--surface] rounded-[--radius-md] text-sm font-semibold hover:opacity-90 transition-opacity min-h-[44px] cursor-pointer"
                 >
                   <Play className="w-4 h-4 fill-current" /> Play
                 </button>
@@ -73,7 +73,7 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
                     setQueue(s, 0);
                     setCurrentTrack(s[0]);
                   }}
-                  className="flex items-center gap-2 px-5 py-2.5 border border-white/10 text-[--muted] rounded-[--radius-md] text-sm font-medium hover:text-[--foreground] transition-colors"
+                  className="flex items-center gap-2 px-5 py-2.5 border border-white/10 text-[--muted] rounded-[--radius-md] text-sm font-medium hover:text-[--foreground] transition-colors min-h-[44px] cursor-pointer"
                 >
                   <Shuffle className="w-4 h-4" /> Shuffle
                 </button>
@@ -85,7 +85,7 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
 
       {!loading && songs.length > 0 && (
         <div className="border-b border-white/[0.05] pb-2 mb-2">
-          <div className="grid grid-cols-[32px_40px_1fr_auto_36px] gap-3 px-3 text-[10px] text-[--muted] uppercase tracking-wider">
+          <div className="grid grid-cols-[32px_40px_1fr_auto_36px] gap-2.5 sm:gap-3 px-2.5 sm:px-3 text-[10px] text-[--muted] uppercase tracking-wider">
             <span>#</span><span /><span>Title</span><span><Clock className="w-3 h-3" /></span><span />
           </div>
         </div>

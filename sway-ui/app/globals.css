@@ -6,10 +6,12 @@
   --color-surface: var(--surface);
   --color-surface-elevated: var(--surface-elevated);
   --color-surface-hover: var(--surface-elevated-hover);
+  --color-surface-overlay: var(--surface-overlay);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-border: var(--border);
-  
+  --color-border-subtle: var(--border-subtle);
+
   --color-art-primary: var(--art-primary);
   --color-art-secondary: var(--art-secondary);
   --color-art-accent: var(--art-accent);
@@ -27,30 +29,60 @@
   --radius-full: var(--radius-full);
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   background-color: var(--surface);
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
-/* Custom scrollbar */
+/* Selection */
+::selection {
+  background-color: var(--art-accent);
+  color: var(--foreground);
+}
+
+/* Smooth artwork color transitions — elements that use --art-* vars transition smoothly */
+/* Note: CSS vars themselves can't transition, but elements referencing them can */
+[data-art-transition] {
+  transition:
+    background-color 600ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 600ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 300ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Refined scrollbar — thin, nearly invisible */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-full);
-  border: 3px solid var(--surface);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 /* Lyrics engine — imported LAST so it wins over Tailwind resets */
 @import "../styles/lyrics-stage.css";
+

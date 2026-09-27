@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ClientShell } from './ClientShell';
+import { ErrorBoundary } from './ErrorBoundary';
 
 /**
  * Mounts client-only overlays only on the client after hydration.
@@ -19,5 +20,9 @@ export function ClientShellLoader() {
     return null;
   }
 
-  return <ClientShell />;
+  return (
+    <ErrorBoundary>
+      <ClientShell />
+    </ErrorBoundary>
+  );
 }

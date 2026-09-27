@@ -15,13 +15,13 @@
 	--blyrics-scroll-timing-offset: 500ms;
 
 	/* Configurable Lyrics Typography & Layout Tokens */
-	--lyrics-font-family: var(--noto-sans-universal);
-	--lyrics-font-size: clamp(1.55rem, 2.5vw, 2.55rem);
-	--lyrics-font-weight: 760;
-	--lyrics-line-height: 1.45;
-	--lyrics-active-scale: 1.04;
-	--lyrics-blur-amount: 1.4px;
-	--lyrics-inactive-opacity: 0.22;
+	--lyrics-font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", var(--font-noto-devanagari), system-ui, sans-serif;
+	--lyrics-font-size: clamp(1.75rem, 2.7vw, 2.75rem);
+	--lyrics-font-weight: 700;
+	--lyrics-line-height: 1.38;
+	--lyrics-active-scale: 1.03;
+	--lyrics-blur-amount: 1.2px;
+	--lyrics-inactive-opacity: 0.42;
 	--lyrics-text-align: left;
 	--lyrics-justify-content: flex-start;
 	--lyrics-transform-origin: left center;
@@ -38,11 +38,6 @@
 	--blyrics-translated-color: rgba(255, 255, 255, 0.55);
 
 	/* ── Animation Timing — Spring-feel Curves ── */
-	/* 
-	  expo.out feel: things arrive fast and settle gently.
-	  All transitions use a single shared spring-like bezier so
-	  lines, words, and background all feel physically consistent.
-	*/
 	--spring-out: cubic-bezier(0.16, 1, 0.3, 1);      /* expo.out — primary spring */
 	--spring-in-out: cubic-bezier(0.45, 0, 0.55, 1);   /* sinusoidal in-out */
 	--snap-out: cubic-bezier(0.22, 1, 0.36, 1);        /* quint.out — snappy settle */
@@ -60,11 +55,11 @@
 	--blyrics-padding: 0.85rem;
 	--blyrics-border-radius: 1rem;
 	--blyrics-scale: 0.94;
-	--blyrics-active-scale: var(--lyrics-active-scale, 1.04);
+	--blyrics-active-scale: var(--lyrics-active-scale, 1.03);
 
-	/* Background Engine */
-	--blyrics-background-brightness: 0.82;
-	--blyrics-background-opacity: 0.95;
+	/* Background Engine — Apple Music Luminous Balance */
+	--blyrics-background-brightness: 0.95;
+	--blyrics-background-opacity: 1.0;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -75,13 +70,13 @@
 	inset: 0;
 	z-index: 1000;
 	display: grid;
-	grid-template-columns: minmax(320px, 40%) 1fr;
+	grid-template-columns: minmax(340px, 42%) 1fr;
 	height: 100vh;
 	height: 100dvh;
 	width: 100vw;
 	color: white;
 	overflow: hidden;
-	background: var(--art-bg-main, #07090e);
+	background: #000000;
 	user-select: none;
 	contain: layout style paint;
 	/* Smooth entry */
@@ -95,17 +90,17 @@
 
 /* ── Apple Music Authentic Multi-Layer Fluid Artwork Engine ── */
 
-/* Layer 0: Multi-layer fluid canvas */
+/* Canvas: Over-scaled to 190% with generous margin to eliminate blur edge-clipping */
 .blyrics-fluid-canvas {
 	position: absolute;
-	inset: -25%;
-	width: 150%;
-	height: 150%;
+	inset: -45%;
+	width: 190%;
+	height: 190%;
 	z-index: 0;
 	pointer-events: none;
 	overflow: hidden;
-	filter: blur(80px) saturate(210%) brightness(var(--blyrics-background-brightness, 0.82));
-	transform: scale(1.06);
+	filter: blur(95px) saturate(190%) brightness(var(--blyrics-background-brightness, 0.95));
+	transform: translate3d(0, 0, 0);
 	will-change: transform;
 }
 
@@ -120,75 +115,54 @@
 	transition: background-image 0.8s ease;
 }
 
-/* Layer 1: Base slow rotation (130% scale) */
+/* Layer 1: Base slow breathing anchor — 100% opacity blankets entire screen with true artwork colors */
 .blyrics-fluid-layer-1 {
-	transform-origin: 48% 46%;
-	animation: fluidSpin1 38s linear infinite;
-	opacity: 0.95;
+	transform: scale(1.6);
+	opacity: 1;
+	animation: appleFluidBase 30s ease-in-out infinite alternate;
 }
 
-/* Layer 2: Orbiting counter-rotation (115% scale, screen blend) */
+@keyframes appleFluidBase {
+	0%   { transform: scale(1.55) translate3d(0%, 0%, 0); }
+	50%  { transform: scale(1.68) translate3d(-2%, 1.5%, 0); }
+	100% { transform: scale(1.55) translate3d(0%, 0%, 0); }
+}
+
+/* Layer 2: Soft-light liquid drift — creates organic depth without 360-deg rotation */
 .blyrics-fluid-layer-2 {
-	transform-origin: 54% 52%;
-	mix-blend-mode: screen;
-	animation: fluidSpin2 26s ease-in-out infinite alternate;
-	opacity: 0.75;
+	mix-blend-mode: soft-light;
+	opacity: 0.85;
+	animation: appleFluidFlow 24s ease-in-out infinite alternate;
 }
 
-/* Layer 3: Soft drift (105% scale, overlay blend) */
+@keyframes appleFluidFlow {
+	0%   { transform: scale(1.75) translate3d(2.5%, -2%, 0) rotate(1.5deg); }
+	50%  { transform: scale(1.88) translate3d(-2.5%, 2%, 0) rotate(-1.5deg); }
+	100% { transform: scale(1.75) translate3d(2.5%, -2%, 0) rotate(1.5deg); }
+}
+
+/* Layer 3: Screen luminance — adds ethereal radiance to artwork highlights */
 .blyrics-fluid-layer-3 {
-	transform-origin: 42% 58%;
-	mix-blend-mode: overlay;
-	animation: fluidDrift 19s ease-in-out infinite alternate;
-	opacity: 0.60;
-}
-
-/* Layer 4: Ambient chromatic bloom from artwork dominant color */
-.blyrics-fluid-layer-4 {
-	transform-origin: 50% 50%;
-	background: radial-gradient(
-		circle at 50% 50%,
-		hsl(var(--art-h, 215) var(--art-s, 45%) 50% / 0.50) 0%,
-		transparent 70%
-	);
 	mix-blend-mode: screen;
-	animation: fluidPulse 14s ease-in-out infinite alternate;
-	opacity: 0.55;
+	opacity: 0.38;
+	animation: appleFluidRadiance 34s ease-in-out infinite alternate;
 }
 
-@keyframes fluidSpin1 {
-	0%   { transform: rotate(0deg) scale(1.15); }
-	50%  { transform: rotate(180deg) scale(1.30); }
-	100% { transform: rotate(360deg) scale(1.15); }
+@keyframes appleFluidRadiance {
+	0%   { transform: scale(1.8) translate3d(-3%, -2.5%, 0) rotate(-1deg); }
+	50%  { transform: scale(1.7) translate3d(3%, 2.5%, 0) rotate(1deg); }
+	100% { transform: scale(1.8) translate3d(-3%, -2.5%, 0) rotate(-1deg); }
 }
 
-@keyframes fluidSpin2 {
-	0%   { transform: rotate(360deg) scale(1.25) translate(-4%, -4%); }
-	50%  { transform: rotate(180deg) scale(1.10) translate(4%, 4%); }
-	100% { transform: rotate(0deg) scale(1.25) translate(-4%, -4%); }
-}
+/* Layer 4: Removed to eliminate fake radial color blobs */
 
-@keyframes fluidDrift {
-	0%   { transform: translate(-6%, 5%) scale(1.18) rotate(0deg); }
-	50%  { transform: translate(5%, -6%) scale(1.32) rotate(-35deg); }
-	100% { transform: translate(-6%, 5%) scale(1.18) rotate(0deg); }
-}
-
-@keyframes fluidPulse {
-	0%   { transform: scale(1); opacity: 0.45; }
-	50%  { transform: scale(1.2); opacity: 0.65; }
-	100% { transform: scale(1); opacity: 0.45; }
-}
-
-/* Layer 5: Cinematic Vignette (Soft center, gentle contrast on lyrics) */
+/* Layer 5: Authentic Apple Music Scrim — uniform 20% dark veil for pristine contrast */
 .better-lyrics-page::after {
 	content: "";
 	position: absolute;
 	inset: 0;
 	z-index: 1;
-	background:
-		radial-gradient(ellipse 110% 90% at 50% 50%, rgba(0, 0, 0, 0.05) 0%, rgba(0, 0, 0, 0.42) 100%),
-		linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.15) 55%, rgba(0, 0, 0, 0.32) 100%);
+	background: rgba(0, 0, 0, 0.20);
 	pointer-events: none;
 }
 
@@ -213,43 +187,46 @@
 	width: 100%;
 	max-width: min(380px, 40vh);
 	aspect-ratio: 1 / 1;
-	border-radius: 16px;
+	border-radius: 22px;
 	box-shadow:
-		0 24px 60px -12px rgba(0, 0, 0, 0.65),
-		0 0 0 1px rgba(255, 255, 255, 0.1),
-		0 0 70px -15px hsl(var(--art-h, 215) var(--art-s, 40%) 50% / 0.25);
+		0 24px 60px -12px rgba(0, 0, 0, 0.55),
+		0 8px 36px -8px hsla(var(--art-h, 215), var(--art-s, 60%), 50%, 0.28),
+		0 0 0 1px rgba(255, 255, 255, 0.08);
 	object-fit: cover;
 	transition: transform 0.3s var(--spring-out), box-shadow 0.3s ease;
 	will-change: transform;
 }
 
 .blyrics-side-panel .album-art:hover {
-	transform: scale(1.02);
+	transform: scale(1.015);
 	box-shadow:
-		0 32px 70px -10px rgba(0, 0, 0, 0.75),
-		0 0 0 1px rgba(255, 255, 255, 0.15),
-		0 0 90px -10px hsl(var(--art-h, 215) var(--art-s, 40%) 55% / 0.35);
+		0 30px 70px -10px rgba(0, 0, 0, 0.65),
+		0 12px 42px -6px hsla(var(--art-h, 215), var(--art-s, 60%), 50%, 0.35),
+		0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
 .blyrics-side-panel .track-info {
 	display: flex;
 	flex-direction: column;
+	align-items: center;
+	text-align: center;
 	width: 100%;
 	max-width: min(380px, 100%);
 }
 
 .blyrics-side-panel .title {
-	font-size: clamp(1.25rem, 1.8vw, 1.75rem);
+	font-size: clamp(1.35rem, 1.7vw, 1.75rem);
 	font-weight: 700;
-	line-height: 1.2;
+	line-height: 1.25;
 	letter-spacing: -0.02em;
 	margin: 0;
 	color: #ffffff;
 	word-break: break-word;
+	text-align: center;
 }
 
 .blyrics-side-panel .artist {
-	font-size: clamp(0.9rem, 1.1vw, 1.1rem);
+	font-size: clamp(0.9rem, 1.1vw, 1.05rem);
 	font-weight: 500;
 	opacity: 0.65;
 	margin: 0;
@@ -258,6 +235,7 @@
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	text-align: center;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -269,18 +247,18 @@
 	height: 100%;
 	width: 100%;
 	z-index: 5;
-	/* Fade edges: tighter top fade for drama */
+	/* Fade edges: subtle top fade, generous bottom */
 	mask-image: linear-gradient(
 		to bottom,
 		transparent 0%,
-		black 12%,
+		black 14%,
 		black 85%,
 		transparent 100%
 	);
 	-webkit-mask-image: linear-gradient(
 		to bottom,
 		transparent 0%,
-		black 12%,
+		black 14%,
 		black 85%,
 		transparent 100%
 	);
@@ -290,27 +268,29 @@
 	width: 100%;
 	height: 100%;
 	position: relative;
-	padding: 0 clamp(1.5rem, 4vw, 5rem);
+	padding: 0 clamp(2rem, 5vw, 6rem);
 	overflow: hidden;
 	box-sizing: border-box;
 }
 
 #blyrics-container {
-	font-family: var(--lyrics-font-family, var(--blyrics-font-family, var(--noto-sans-universal)));
-	font-size: var(--lyrics-font-size, var(--blyrics-font-size, clamp(1.55rem, 2.5vw, 2.55rem)));
-	font-weight: var(--lyrics-font-weight, var(--blyrics-font-weight, 760));
-	line-height: var(--lyrics-line-height, var(--blyrics-line-height, 1.45));
-	text-align: var(--lyrics-text-align, left);
+	font-family: var(--lyrics-font-family, var(--blyrics-font-family, var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif));
+	font-size: var(--lyrics-font-size, var(--blyrics-font-size, clamp(1.75rem, 2.7vw, 2.75rem)));
+	font-weight: 700;
+	letter-spacing: -0.025em;
+	line-height: var(--lyrics-line-height, var(--blyrics-line-height, 1.32));
+	text-align: left !important;
 	position: relative !important;
 	z-index: 1;
 	width: 100%;
-	max-width: 820px;
-	padding-top: 5vh;
+	max-width: 720px;
+	padding-top: 22vh;
 	padding-bottom: 68vh;
 	box-sizing: border-box;
 	display: flex;
 	flex-direction: column;
-	gap: 0.7rem;
+	align-items: flex-start !important;
+	gap: clamp(1.8rem, 3.2vh, 2.6rem);
 	will-change: transform;
 	transform: translate3d(0, 0, 0);
 }
@@ -319,8 +299,8 @@
    LYRIC LINES — State Hierarchy
    ════════════════════════════════════════════════════════════ */
 .blyrics--line {
-	transform: scale(0.94) translateX(-2px);
-	transform-origin: var(--lyrics-transform-origin, left center);
+	transform: scale(0.96) translateX(-2px);
+	transform-origin: left center;
 	transition:
 		transform    0.42s var(--spring-out),
 		opacity      0.38s ease-out,
@@ -328,13 +308,13 @@
 		text-shadow  0.42s var(--spring-out);
 	display: flex;
 	flex-flow: row wrap;
-	align-items: baseline;
-	justify-content: var(--lyrics-justify-content, flex-start);
-	text-align: var(--lyrics-text-align, left);
-	padding: clamp(0.45rem, 0.9vh, 0.8rem) 0;
+	align-items: baseline !important;
+	justify-content: flex-start !important;
+	text-align: left !important;
+	padding: clamp(0.2rem, 0.5vh, 0.4rem) 0;
 	box-sizing: border-box;
-	opacity: var(--lyrics-inactive-opacity, 0.22);
-	filter: blur(var(--lyrics-blur-amount, 1.4px));
+	opacity: var(--lyrics-inactive-opacity, 0.42);
+	filter: blur(var(--lyrics-blur-amount, 1.2px));
 	cursor: pointer;
 	user-select: none;
 	word-break: break-word;
@@ -343,6 +323,9 @@
 	will-change: transform, opacity, filter;
 	border-radius: 10px;
 	text-shadow: none;
+	font-weight: 700;
+	letter-spacing: -0.022em;
+	color: #ffffff;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -367,9 +350,9 @@
 }
 
 .blyrics--line:hover {
-	opacity: 0.82 !important;
+	opacity: 0.85 !important;
 	filter: blur(0px) !important;
-	transform: scale(0.96) translateX(-1px) !important;
+	transform: scale(0.98) translateX(2px) !important;
 }
 
 .blyrics--line:focus-visible {
@@ -382,30 +365,29 @@
 
 /* Passed lines — slightly more faded than inactive */
 .blyrics--line.blyrics--passed {
-	opacity: calc(var(--lyrics-inactive-opacity, 0.22) * 0.7);
-	filter: blur(calc(var(--lyrics-blur-amount, 1.4px) * 1.1));
-	transform: scale(0.93) translateX(-3px);
+	opacity: 0.28;
+	filter: blur(1.4px);
+	transform: scale(0.95) translateX(-3px);
 }
 
 /* Neighbor lines — almost readable, slight blur cleared */
 .blyrics--line.blyrics--neighbor {
-	transform: scale(0.97) translateX(-1px);
-	opacity: 0.48;
-	filter: blur(0.4px);
+	transform: scale(0.98) translateX(-1px);
+	opacity: 0.52;
+	filter: blur(0.6px);
 	pointer-events: auto;
 }
 
-/* ACTIVE LINE — Spring scale-up + art-color glow halo */
+/* ACTIVE LINE — Spring scale-up + soft luminous bloom */
 .blyrics--line.blyrics--active {
-	transform: scale(var(--blyrics-active-scale, 1.04)) translateX(0px) !important;
+	transform: scale(var(--blyrics-active-scale, 1.03)) translateX(0px) !important;
 	opacity: 1 !important;
 	filter: none !important;
-	font-weight: var(--lyrics-font-weight, 760);
-	color: #ffffff;
-	/* Art-color ambient glow on active line */
+	font-weight: 700 !important;
+	color: #ffffff !important;
 	text-shadow:
-		0 0 40px hsl(var(--art-h, 215) var(--art-s, 40%) 70% / 0.18),
-		0 0 80px hsl(var(--art-h, 215) var(--art-s, 40%) 70% / 0.08);
+		0 0 35px rgba(255, 255, 255, 0.28),
+		0 0 70px rgba(255, 255, 255, 0.12) !important;
 	pointer-events: auto;
 	transition:
 		transform    0.45s var(--spring-out),
@@ -425,7 +407,7 @@
 	top: 18%;
 	height: 64%;
 	width: 3px;
-	background: hsl(var(--art-h, 215) var(--art-s, 40%) 75%);
+	background: #ffffff;
 	border-radius: 2px;
 	opacity: 0.9;
 	transition: background 1s var(--spring-out);
@@ -453,51 +435,36 @@
    WORD KARAOKE — Pure RAF-driven liquid sweep
    
    CRITICAL: NO CSS transition on --word-progress.
-   The RAF loop updates at ~7ms (144fps target). Adding a CSS 
-   transition creates two competing animation layers — the 
-   transition chases the RAF value and always lags behind,
-   causing visible jitter + snap when words complete.
+   The RAF loop updates at ~7ms (144fps target).
    The RAF IS the animation. CSS just renders what JS sets.
    ════════════════════════════════════════════════════════════ */
 .blyrics--word {
 	white-space: pre-wrap;
 	display: inline-block;
 	position: relative;
-	/*
-	  The gradient sweeps left → right as --word-progress goes 0% → 100%.
-	  Art-tinted bright white (sung) | dim white (unsung).
-	  No CSS transition — RAF updates this at 144fps directly.
-	*/
 	background: linear-gradient(
 		90deg,
-		hsl(var(--art-h, 215) 55% 97%) 0%,
-		hsl(var(--art-h, 215) 55% 97%) var(--word-progress, 0%),
-		rgba(255, 255, 255, 0.30)       var(--word-progress, 0%),
-		rgba(255, 255, 255, 0.30)       100%
+		#ffffff 0%,
+		#ffffff var(--word-progress, 0%),
+		rgba(255, 255, 255, 0.65) var(--word-progress, 0%),
+		rgba(255, 255, 255, 0.65) 100%
 	);
 	-webkit-background-clip: text;
 	background-clip: text;
 	-webkit-text-fill-color: transparent;
 	color: transparent;
-	/*
-	  contain:style prevents each word's style update from
-	  triggering a full-subtree style recalc.
-	  Do NOT use will-change:background — browsers cannot 
-	  GPU-composite background-clip:text, so it always CPU-repaints.
-	  will-change here would create unnecessary compositor layers.
-	*/
 	contain: style;
 	text-rendering: optimizeSpeed;
 }
 
-/* In active line: words start slightly brighter */
+/* In active line: sung words are brilliant #ffffff, upcoming are crisp 65% opacity */
 .blyrics--active .blyrics--word {
 	background: linear-gradient(
 		90deg,
-		hsl(var(--art-h, 215) 50% 98%) 0%,
-		hsl(var(--art-h, 215) 50% 98%) var(--word-progress, 0%),
-		rgba(255, 255, 255, 0.38)       var(--word-progress, 0%),
-		rgba(255, 255, 255, 0.38)       100%
+		#ffffff 0%,
+		#ffffff var(--word-progress, 0%),
+		rgba(255, 255, 255, 0.65) var(--word-progress, 0%),
+		rgba(255, 255, 255, 0.65) 100%
 	);
 	-webkit-background-clip: text;
 	background-clip: text;
@@ -521,16 +488,11 @@
 
 /*
   Completed words: stay on the SAME gradient path with --word-progress: 100%.
-  Do NOT switch to text-fill-color here — that causes the visible "snap"
-  when the gradient abruptly cuts out.
-  The gradient at 100% IS pure white (sung side covers entire width).
+  Do NOT switch to text-fill-color here — that causes the visible "snap".
+  The gradient at 100% IS pure white.
 */
 .blyrics--word.blyrics--word-done {
 	--word-progress: 100%;
-	/* 
-	  Keep the same gradient — at 100% the entire word is bright white.
-	  This avoids the text-fill snap.
-	*/
 }
 
 .blyrics--active .blyrics--word.blyrics--word-done {
@@ -541,8 +503,8 @@
 .blyrics--line.blyrics--passed .blyrics--word,
 .blyrics--line.blyrics--passed .blyrics--word.blyrics--word-done {
 	background: none !important;
-	-webkit-text-fill-color: rgba(255, 255, 255, 0.24) !important;
-	color: rgba(255, 255, 255, 0.24) !important;
+	-webkit-text-fill-color: rgba(255, 255, 255, 0.35) !important;
+	color: rgba(255, 255, 255, 0.35) !important;
 	--word-progress: 0%;
 }
 
@@ -636,11 +598,14 @@
 	border-radius: 50%;
 	background: #ffffff;
 	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-	transition: transform 0.15s var(--spring-out);
+	opacity: 0;
+	transition: transform 0.15s var(--spring-out), opacity 0.15s ease;
 	pointer-events: none;
 }
 
-.blyrics-progress-track:hover .blyrics-progress-thumb {
+.blyrics-progress-track:hover .blyrics-progress-thumb,
+.blyrics-progress-track.is-seeking .blyrics-progress-thumb {
+	opacity: 1;
 	transform: translate(-50%, -50%) scale(1.05);
 }
 
@@ -825,7 +790,7 @@
 	.blyrics-side-panel {
 		flex-direction: row;
 		align-items: center;
-		padding: 0.75rem 1rem;
+		padding: calc(3.4rem + env(safe-area-inset-top, 0px)) 1rem 0.75rem 1rem;
 		gap: 0.85rem;
 		background: rgba(8, 11, 18, 0.72);
 		backdrop-filter: blur(28px) saturate(1.4);
@@ -911,7 +876,7 @@
    ════════════════════════════════════════════════════════════ */
 @media screen and (max-width: 480px) {
 	.blyrics-side-panel {
-		padding: 0.6rem 0.85rem;
+		padding: calc(3.4rem + env(safe-area-inset-top, 0px)) 0.85rem 0.6rem 0.85rem;
 		gap: 0.65rem;
 	}
 
@@ -970,8 +935,8 @@
 /* Fluid Atmosphere (Apple Music Nao & Taylor Swift vibrant style) */
 .better-lyrics-page.blyrics-bg-mesh .blyrics-fluid-canvas,
 .better-lyrics-page.blyrics-bg-wash .blyrics-fluid-canvas {
-	filter: blur(85px) saturate(220%) brightness(var(--blyrics-background-brightness, 0.75)) !important;
-	opacity: 0.95 !important;
+	filter: blur(95px) saturate(190%) brightness(var(--blyrics-background-brightness, 0.95)) !important;
+	opacity: 1 !important;
 }
 
 @media screen and (min-width: 1025px) {
@@ -981,12 +946,13 @@
 	}
 	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel {
 		padding: clamp(2rem, 3.8vw, 4.5rem) clamp(2rem, 4vw, 5.5rem);
-		align-items: flex-start;
+		align-items: center;
+		justify-content: center;
 	}
 	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel .album-art {
-		max-width: min(380px, 38vh);
-		max-height: 38vh;
-		border-radius: 20px;
+		max-width: min(380px, 40vh);
+		max-height: 40vh;
+		border-radius: 22px;
 	}
 	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel .track-info,
 	.better-lyrics-page.blyrics-layout-split .blyrics-side-panel .blyrics-controls-pill,
@@ -1128,5 +1094,171 @@
 	color: #ffffff !important;
 	opacity: 1 !important;
 }
+
+/* Hide Next.js dev toast/logo badge */
+[data-nextjs-toast],
+nextjs-portal,
+#nextjs-dev-overlay {
+	display: none !important;
+}
+
+/* ════════════════════════════════════════════════════════════
+   3 FULL-SCREEN STAGE MODES (Apple Music | Vinyl | Cinema)
+   ════════════════════════════════════════════════════════════ */
+
+/* Static Background (Battery Saver / Low GPU Mode) */
+.blyrics-fluid-canvas.motion-static .blyrics-fluid-layer {
+	animation: none !important;
+}
+
+/* Mode 2: Vinyl / Album Art Focus Mode */
+.better-lyrics-page.stage-mode-vinyl {
+	display: flex !important;
+	flex-direction: column !important;
+	align-items: center !important;
+	justify-content: center !important;
+}
+
+.better-lyrics-page.stage-mode-vinyl .blyrics-side-panel,
+.better-lyrics-page.stage-mode-vinyl .blyrics-panel {
+	display: none !important;
+}
+
+.stage-vinyl-view {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	max-width: 520px;
+	margin: 0 auto;
+	padding: 2rem 1.5rem;
+	z-index: 10;
+	position: relative;
+	box-sizing: border-box;
+	animation: pageEnter 0.35s var(--spring-out) both;
+}
+
+.stage-vinyl-art {
+	width: 100%;
+	max-width: min(390px, 42vh);
+	aspect-ratio: 1 / 1;
+	border-radius: 26px;
+	box-shadow:
+		0 30px 80px -15px rgba(0, 0, 0, 0.75),
+		0 12px 45px -8px hsla(var(--art-h, 215), var(--art-s, 60%), 50%, 0.35),
+		0 0 0 1px rgba(255, 255, 255, 0.1);
+	position: relative;
+}
+
+.stage-vinyl-glow {
+	position: absolute;
+	inset: -20px;
+	border-radius: 40px;
+	filter: blur(40px);
+	opacity: 0.45;
+	background: hsla(var(--art-h, 215), var(--art-s, 60%), 50%, 0.4);
+	pointer-events: none;
+	z-index: 0;
+}
+
+/* Mode 3: Cinema / Sing Focus Mode */
+.better-lyrics-page.stage-mode-cinema {
+	display: flex !important;
+	flex-direction: column !important;
+}
+
+.better-lyrics-page.stage-mode-cinema .blyrics-side-panel {
+	display: none !important;
+}
+
+.better-lyrics-page.stage-mode-cinema .blyrics-panel {
+	width: 100% !important;
+	max-width: 960px !important;
+	margin: 0 auto !important;
+}
+
+.better-lyrics-page.stage-mode-cinema #blyrics-container {
+	font-size: clamp(2.2rem, 3.8vw, 3.8rem) !important;
+	max-width: 100% !important;
+	align-items: center !important;
+	text-align: center !important;
+	gap: clamp(2.2rem, 4vh, 3.2rem) !important;
+	padding-top: 18vh !important;
+	padding-bottom: 35vh !important;
+}
+
+.better-lyrics-page.stage-mode-cinema .blyrics--line {
+	justify-content: center !important;
+	text-align: center !important;
+	transform-origin: center center !important;
+}
+
+.better-lyrics-page.stage-mode-cinema .blyrics--word {
+	text-align: center !important;
+}
+
+.stage-cinema-dock {
+	position: fixed;
+	bottom: 2rem;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	padding: 0.65rem 1.4rem;
+	border-radius: 9999px;
+	background: rgba(12, 16, 24, 0.65);
+	backdrop-filter: blur(28px) saturate(180%);
+	-webkit-backdrop-filter: blur(28px) saturate(180%);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	box-shadow:
+		0 20px 50px rgba(0, 0, 0, 0.6),
+		0 0 0 1px rgba(255, 255, 255, 0.06);
+	color: #ffffff;
+	animation: cinemaDockEnter 0.35s var(--spring-out) both;
+}
+
+@keyframes cinemaDockEnter {
+	from { opacity: 0; transform: translate(-50%, 15px); }
+	to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media screen and (max-width: 1024px) {
+	.stage-vinyl-view {
+		padding: calc(4rem + env(safe-area-inset-top, 0px)) 1rem calc(6.5rem + env(safe-area-inset-bottom, 0px)) 1rem;
+		max-height: 100dvh;
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	.stage-vinyl-view .album-art,
+	.stage-vinyl-view .relative.aspect-square {
+		max-width: min(280px, 32vh) !important;
+	}
+
+	.better-lyrics-page.stage-mode-cinema #blyrics-container {
+		font-size: clamp(1.75rem, 6vw, 2.5rem) !important;
+		padding-top: calc(4.5rem + env(safe-area-inset-top, 0px)) !important;
+		padding-bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px)) !important;
+		gap: clamp(1.4rem, 2.8vh, 2rem) !important;
+	}
+}
+
+@media screen and (max-width: 480px) {
+	.stage-vinyl-view .album-art,
+	.stage-vinyl-view .relative.aspect-square {
+		max-width: min(240px, 28vh) !important;
+	}
+
+	.better-lyrics-page.stage-mode-cinema #blyrics-container {
+		font-size: clamp(1.5rem, 5.5vw, 2.1rem) !important;
+		padding-top: calc(4.2rem + env(safe-area-inset-top, 0px)) !important;
+		padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px)) !important;
+	}
+}
+
+
 
 

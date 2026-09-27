@@ -122,26 +122,26 @@ export default function SearchPage() {
   ];
 
   return (
-    <div className="px-6 py-10 max-w-6xl mx-auto">
+    <div className="px-4 sm:px-6 md:px-8 py-6 sm:py-10 max-w-6xl mx-auto">
       {/* Input */}
-      <div className="relative mb-10">
+      <div className="relative mb-6 sm:mb-8">
         <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[--muted]" />
         <input
           ref={inputRef}
           value={query} onChange={handleChange}
           placeholder="What do you want to listen to?"
-          className="w-full h-12 pl-12 pr-4 bg-[--surface-elevated] border border-white/[0.06] rounded-[--radius-lg] text-[--foreground] placeholder:text-[--muted] text-sm outline-none focus:border-white/10 transition-colors"
+          className="w-full bg-[#111118] border border-white/[0.08] rounded-[12px] px-4 py-3 pl-12 text-[--foreground] placeholder:text-[--muted] text-sm outline-none focus:border-[--art-primary]/50 focus:ring-2 focus:ring-[--art-primary]/20 transition-all"
         />
         {loading && <span className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[--muted] border-t-transparent rounded-full animate-spin" />}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs - horizontally scrollable without wrapping on small screens */}
       {results && (
-        <div className="flex gap-1.5 mb-8">
+        <div className="flex gap-2 mb-6 sm:mb-8 overflow-x-auto no-scrollbar py-1 -mx-4 px-4 sm:mx-0 sm:px-0">
           {TABS.map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                tab === key ? 'bg-[--foreground] text-[--surface]' : 'text-[--muted] hover:text-[--foreground] hover:bg-[--surface-elevated]'
+              className={`rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors whitespace-nowrap flex-shrink-0 cursor-pointer ${
+                tab === key ? 'bg-[--art-primary]/20 border border-[--art-primary]/40 text-[--art-primary]' : 'bg-[#111118] border border-white/[0.06] text-[--muted] hover:text-[--foreground] hover:bg-white/[0.03]'
               }`}
             >{label}</button>
           ))}
@@ -167,9 +167,19 @@ export default function SearchPage() {
       )}
 
       {/* Empty */}
-      {!loading && !query && <EmptyState icon={<SearchIcon className="w-10 h-10" />} title="Search for anything" description="Songs, artists, albums, playlists" />}
+      {!loading && !query && (
+        <div className="flex flex-col items-center justify-center py-20 text-center text-[--muted]">
+          <SearchIcon className="w-16 h-16 mb-4 opacity-50" />
+          <h2 className="text-lg font-semibold text-[--foreground] mb-2">Search for anything</h2>
+          <p className="text-sm">Songs, artists, albums, playlists</p>
+        </div>
+      )}
       {!loading && query && results && !songs.length && !artists.length && !albums.length && !playlists.length && (
-        <EmptyState title={`No results for "${query}"`} description="Try a different search term" />
+        <div className="flex flex-col items-center justify-center py-20 text-center text-[--muted]">
+          <SearchIcon className="w-16 h-16 mb-4 opacity-50" />
+          <h2 className="text-lg font-semibold text-[--foreground] mb-2">No results for "{query}"</h2>
+          <p className="text-sm">Try a different search term</p>
+        </div>
       )}
 
       {/* Results */}

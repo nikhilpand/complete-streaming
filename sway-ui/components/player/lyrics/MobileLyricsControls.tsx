@@ -43,7 +43,7 @@ export const MobileLyricsControls = memo(({
   const currentProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="lg:hidden fixed bottom-3 left-3 right-3 z-[250] flex flex-col items-center gap-2 max-w-md mx-auto pointer-events-auto">
+    <div className="lg:hidden fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] left-3 right-3 z-[250] flex flex-col items-center gap-2 max-w-md mx-auto pointer-events-auto">
       {/* Mobile Mini Scrub Bar */}
       <div
         className="w-full h-1.5 bg-white/15 rounded-full overflow-hidden relative cursor-pointer active:h-2.5 transition-all"

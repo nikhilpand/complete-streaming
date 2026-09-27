@@ -104,19 +104,19 @@ export default function LibraryPage() {
   }, []);
 
   return (
-    <div className="px-6 py-10 max-w-7xl mx-auto space-y-14">
+    <div className="px-4 sm:px-6 md:px-8 py-6 sm:py-10 max-w-7xl mx-auto space-y-10 sm:space-y-14">
       {/* Header */}
       <div className="space-y-1">
         <p className="text-[10px] text-[--muted] uppercase tracking-widest font-mono">Taste & Library</p>
-        <h1 className="text-4xl font-bold text-[--foreground] tracking-tight">Your Library</h1>
+        <h1 className="text-3xl sm:text-4xl font-bold text-[--foreground] tracking-tight">Your Library</h1>
         <p className="text-[--muted] text-sm">Personalized taste profile, recommendations, and curated discovery</p>
       </div>
 
       {/* Taste Profile Persona Banner */}
       {taste && (
-        <section className="relative overflow-hidden rounded-[--radius-xl] border border-white/[0.08] bg-[--surface-elevated] p-6">
+        <section className="relative overflow-hidden rounded-[--radius-xl] border border-white/[0.08] bg-[--surface-elevated] p-4 sm:p-6">
           <div className="absolute right-0 top-0 -mr-10 -mt-10 h-44 w-44 rounded-full bg-[--art-accent] opacity-20 blur-3xl pointer-events-none" />
-          <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.08] text-[11px] font-mono text-[--art-accent]">
@@ -211,7 +211,7 @@ export default function LibraryPage() {
             <Link
               key={m.label}
               href={`/search?q=${encodeURIComponent(m.query)}`}
-              className="px-4 py-2 rounded-[--radius-sm] bg-[--surface-elevated] text-[--foreground] text-sm font-medium hover:bg-[--surface-elevated-hover] transition-colors"
+              className="px-4 py-2.5 rounded-[--radius-sm] bg-[--surface-elevated] text-[--foreground] text-sm font-medium hover:bg-[--surface-elevated-hover] transition-colors min-h-[44px] flex items-center"
             >
               {m.label}
             </Link>

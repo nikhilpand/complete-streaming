@@ -95,14 +95,14 @@ export function LyricsSettingsPopover({
         onClick={() => setIsOpen((prev) => !prev)}
         aria-label="Lyrics display settings"
         aria-expanded={isOpen}
-        className={`w-11 h-11 rounded-full flex items-center justify-center transition-all cursor-pointer backdrop-blur-2xl border ${
+        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
           isOpen
-            ? 'bg-white/25 border-white/30 text-white shadow-lg'
-            : 'bg-white/10 hover:bg-white/20 border-white/15 text-white/80 hover:text-white'
+            ? 'bg-white/20 text-white shadow-sm'
+            : 'text-white/40 hover:text-white hover:bg-white/10'
         }`}
         title="Customize typography & sync"
       >
-        <span className="font-semibold text-sm tracking-tight font-serif select-none">Aa</span>
+        <span className="font-semibold text-xs tracking-tight select-none">Aa</span>
       </button>
 
       {/* Popover Panel */}

@@ -7,6 +7,7 @@ import { resolveMedia } from '@/lib/api/songs';
 import { sendTelemetry } from '@/lib/api/telemetry';
 import { scheduleExtract, applyPalette } from '@/lib/color/colorExtractor';
 import { artistNames, artUrl } from '@/lib/utils';
+import { prefetchLyrics } from '@/lib/lyricsCache';
 import type { Song } from '@/lib/api/types';
 
 function getTrackMeta(t: Song | null) {
@@ -328,6 +329,9 @@ export function usePlayback() {
     if (currentTrack.artwork_url) {
       scheduleExtract(currentTrack.artwork_url, applyPalette);
     }
+
+    // Background lyrics prefetch — so opening lyrics panel is instant (0ms, no spinner)
+    prefetchLyrics(currentTrack);
 
     const attemptLoad = (isRetry = false) => {
       if (ac.signal.aborted || playbackGenRef.current !== generation) return;

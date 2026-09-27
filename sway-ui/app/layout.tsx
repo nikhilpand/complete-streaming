@@ -30,10 +30,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${notoDevanagari.variable} ${mukta.variable}`}
     >
-      <body className="flex h-screen overflow-hidden bg-[--surface] text-[--foreground]">
+      <body className="flex flex-col md:flex-row h-screen h-[100dvh] overflow-hidden bg-[--surface] text-[--foreground]">
         <Sidebar />
-        {/* Main scroll area: pb mobile (player 80 + nav 56 + safe-area), pb-[80px] md+ */}
-        <main className="flex-1 overflow-y-auto pb-[calc(136px+env(safe-area-inset-bottom,0px))] md:pb-[80px]">{children}</main>
+        {/* Main scroll area: responsive bottom padding so content clears bottom nav & player */}
+        <main className="w-full flex-1 min-h-0 overflow-y-auto overflow-x-hidden scroll-smooth pb-36 md:pb-24">
+          {children}
+        </main>
         {/* All client-only overlays: player, lyrics, queue, search, mobile nav */}
         <ClientShellLoader />
       </body>

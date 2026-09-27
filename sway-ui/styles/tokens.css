@@ -1,26 +1,28 @@
 :root {
-  /* Colors - Base Theme (Dark by default) */
-  --surface: #0a0a0a;
-  --surface-elevated: #111111;
-  --surface-elevated-hover: #1a1a1a;
-  --foreground: #ffffff;
-  --muted: #a3a3a3;
-  --border: rgba(255, 255, 255, 0.1);
-  --focus: rgba(255, 255, 255, 0.2);
+  /* ── Surfaces (OLED-first dark hierarchy) ─────────────────── */
+  --surface: #08080d;
+  --surface-elevated: #101016;
+  --surface-elevated-hover: #16161e;
+  --surface-overlay: #1a1a24;
+  --foreground: #f0f0f5;
+  --muted: #8888a0;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --focus: rgba(255, 255, 255, 0.18);
 
-  /* Artwork-driven colors (updated via JS) */
-  --art-primary: #333333;
-  --art-secondary: #222222;
-  --art-accent: #ffffff;
-  --art-wash: rgba(51, 51, 51, 0.1);
-  --art-h: 215;
-  --art-s: 35%;
-  --art-l: 18%;
-  --art-bg-main: hsl(var(--art-h), var(--art-s), max(calc(var(--art-l) - 15%), 6%));
-  --art-pill-bg: hsl(var(--art-h), max(calc(var(--art-s) - 5%), 10%), max(calc(var(--art-l) - 4%), 10%));
-  --art-pill-active: hsl(var(--art-h), min(calc(var(--art-s) + 15%), 80%), min(calc(var(--art-l) + 30%), 85%));
+  /* ── Artwork-driven colors (updated via JS) ───────────────── */
+  --art-primary: #7c7cff;
+  --art-secondary: rgba(124, 124, 255, 0.55);
+  --art-accent: rgba(124, 124, 255, 0.22);
+  --art-wash: rgba(124, 124, 255, 0.07);
+  --art-h: 240;
+  --art-s: 60%;
+  --art-l: 65%;
+  --art-bg-main: hsl(var(--art-h), var(--art-s), max(calc(var(--art-l) - 55%), 5%));
+  --art-pill-bg: hsl(var(--art-h), max(calc(var(--art-s) - 5%), 10%), max(calc(var(--art-l) - 45%), 10%));
+  --art-pill-active: hsl(var(--art-h), min(calc(var(--art-s) + 10%), 80%), min(calc(var(--art-l) + 15%), 80%));
 
-  /* Spacing */
+  /* ── Spacing (4px base rhythm) ────────────────────────────── */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -33,7 +35,7 @@
   --space-16: 64px;
   --space-20: 80px;
 
-  /* Radii */
+  /* ── Radii ────────────────────────────────────────────────── */
   --radius-xs: 4px;
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -42,12 +44,19 @@
   --radius-2xl: 28px;
   --radius-full: 9999px;
 
-  /* Motion */
-  --motion-fast: 120ms;
-  --motion-normal: 220ms;
+  /* ── Motion ───────────────────────────────────────────────── */
+  --motion-fast: 150ms;
+  --motion-normal: 250ms;
   --motion-slow: 380ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── Shadows ──────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.6);
+  --shadow-xl: 0 24px 80px rgba(0,0,0,0.7);
 }
 
 @media (prefers-reduced-motion: reduce) {

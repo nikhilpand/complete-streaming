@@ -37,43 +37,43 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
   if (error) return <div className="flex items-center justify-center h-screen"><ErrorState message={error} onRetry={load} /></div>;
 
   return (
-    <div>
+<div className="flex flex-col">
       {/* Hero */}
-      <div className="relative h-72 md:h-80 bg-[--surface-elevated] overflow-hidden">
-        {artist?.image_url ? (
-          <Artwork
-            src={artist.image_url}
-            alt={artist.name}
-            size={1200}
-            className="w-full h-full object-cover object-top opacity-50"
-          />
-        ) : null}
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 30%, var(--surface))' }} />
-        <div className="absolute bottom-0 left-0 right-0 px-6 pb-6">
-          {loading ? (
-            <><Skeleton className="h-12 w-48 mb-2" /><Skeleton className="h-4 w-32" /></>
-          ) : artist ? (
-            <>
-              <h1 className="text-5xl font-bold text-[--foreground] tracking-tight">{artist.name}</h1>
+      <div className="flex flex-col sm:flex-row items-center sm:items-end gap-6 sm:gap-8 px-4 sm:px-6 md:px-8 pt-8 sm:pt-12 pb-6 text-center sm:text-left">
+        {loading ? (
+          <>
+            <Skeleton className="w-32 h-32 sm:w-40 sm:h-40 rounded-full flex-shrink-0" />
+            <div className="space-y-3 flex-1 flex flex-col items-center sm:items-start">
+              <Skeleton className="h-8 sm:h-10 w-48" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+          </>
+        ) : artist ? (
+          <>
+            <div className="w-32 h-32 sm:w-[160px] sm:h-[160px] rounded-full overflow-hidden flex-shrink-0 shadow-2xl bg-[--surface-elevated] ring-1 ring-white/10">
+              <Artwork src={artist.image_url} alt={artist.name} size={160} className="w-full h-full object-cover" />
+            </div>
+            <div className="min-w-0 space-y-2">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-[--foreground] tracking-tight truncate">{artist.name}</h1>
               {((artist.follower_count ?? 0) > 0 || (artist.fan_count ?? 0) > 0) && (
-                <p className="text-[--muted] text-sm mt-1">
+                <p className="text-[--muted] text-sm">
                   {formatCount(artist.follower_count || artist.fan_count || 0)} followers
                 </p>
               )}
-            </>
-          ) : null}
-        </div>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* Actions */}
-      <div className="px-6 py-5 flex items-center gap-3">
+      <div className="px-4 sm:px-6 md:px-8 py-4 sm:py-5 flex items-center justify-center sm:justify-start gap-3">
         <button
           disabled={loading || !topSongs.length}
           onClick={() => {
             setQueue(topSongs, 0);
             setCurrentTrack(topSongs[0]);
           }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[--foreground] text-[--surface] rounded-[--radius-md] text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+          className="flex items-center gap-2 px-6 py-2.5 bg-[--foreground] text-[--surface] rounded-[10px] text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer"
         >
           <Play className="w-4 h-4 fill-current" /> Play
         </button>
@@ -84,16 +84,18 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
             setQueue(s, 0);
             setCurrentTrack(s[0]);
           }}
-          className="flex items-center gap-2 px-5 py-2.5 border border-white/10 text-[--muted] rounded-[--radius-md] text-sm font-medium hover:text-[--foreground] transition-colors disabled:opacity-40"
+          className="flex items-center gap-2 px-5 py-2.5 border border-white/10 text-[--muted] rounded-[10px] text-sm font-medium hover:text-[--foreground] hover:border-white/20 transition-colors disabled:opacity-40 cursor-pointer"
         >
           <Shuffle className="w-4 h-4" /> Shuffle
         </button>
       </div>
 
-      <div className="px-6 space-y-12 pb-12">
+      <div className="px-4 sm:px-6 md:px-8 space-y-10 sm:space-y-12 pb-12">
         {/* Popular */}
         <section>
-          <h2 className="text-lg font-semibold text-[--foreground] mb-3 tracking-tight">Popular</h2>
+          <div className="border-b border-white/[0.04] pb-3 mb-4">
+            <h2 className="text-lg font-semibold text-[--foreground] tracking-tight">Top Songs</h2>
+          </div>
           {loading ? Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex items-center gap-3 px-3 py-2">
               <Skeleton className="w-8 h-4 rounded" />
@@ -105,23 +107,38 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
         </section>
 
         {!loading && topAlbums.length > 0 && (
-          <HorizontalShelf title="Albums">
-            {topAlbums.map((a) => (
-              <AlbumCard key={a.id} id={a.id} title={a.title}
-                subtitle={typeof a.artists === 'string' ? a.artists : ''}
-                artwork_url={a.artwork_url}
-              />
-            ))}
-          </HorizontalShelf>
+          <section>
+            <div className="border-b border-white/[0.04] pb-3 mb-4">
+              <h2 className="text-lg font-semibold text-[--foreground] tracking-tight">Albums</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {topAlbums.map((a) => (
+                <AlbumCard key={a.id} id={a.id} title={a.title}
+                  subtitle={typeof a.artists === 'string' ? a.artists : ''}
+                  artwork_url={a.artwork_url}
+                />
+              ))}
+            </div>
+          </section>
         )}
 
         {!loading && singles.length > 0 && (
           <section>
-            <h2 className="text-lg font-semibold text-[--foreground] mb-3 tracking-tight">Singles</h2>
-            {singles.map((s, i) => <SongRow key={s.id} song={s} index={i} context={singles} />)}
+            <div className="border-b border-white/[0.04] pb-3 mb-4">
+              <h2 className="text-lg font-semibold text-[--foreground] tracking-tight">Singles</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {singles.map((a) => (
+                <AlbumCard key={a.id} id={a.id} title={a.title}
+                  subtitle={typeof a.artists === 'string' ? a.artists : ''}
+                  artwork_url={a.artwork_url}
+                />
+              ))}
+            </div>
           </section>
         )}
       </div>
     </div>
   );
 }
+
