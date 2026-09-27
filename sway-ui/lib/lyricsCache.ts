@@ -92,12 +92,15 @@ export function deleteCacheEntriesForTrack(trackId: string) {
   for (const [key, entry] of lyricsMemoryCache.entries()) {
     const entryNormTrack = entry.trackId ? (makeRecordingKey(entry.trackId) || entry.trackId) : null;
     const entryNormRec = entry.recordingKey ? (makeRecordingKey(entry.recordingKey) || entry.recordingKey) : null;
+    const entryNormCanon = entry.canonicalTrackKey ? (makeRecordingKey(entry.canonicalTrackKey) || entry.canonicalTrackKey) : null;
 
     const matches =
       entry.trackId === suppliedTrackId ||
       entry.recordingKey === suppliedTrackId ||
+      entry.canonicalTrackKey === suppliedTrackId ||
       (entryNormTrack !== null && entryNormTrack === normalizedTrackId) ||
-      (entryNormRec !== null && entryNormRec === normalizedTrackId);
+      (entryNormRec !== null && entryNormRec === normalizedTrackId) ||
+      (entryNormCanon !== null && entryNormCanon === normalizedTrackId);
 
     if (matches) {
       keysToDelete.add(key);
@@ -184,8 +187,12 @@ export function getCachedLyrics(
           lyricsMemoryCache.delete(plainKey);
           return null;
         }
-        if (entry.status === 'FOUND' && entry.engineVersion && entry.engineVersion !== CLIENT_ENGINE_VERSION) {
-          lyricsMemoryCache.delete(plainKey);
+        if (entry.status === 'FOUND' && entry.engineVersion !== CLIENT_ENGINE_VERSION) {
+          if (entry.trackId && !entry.trackId.startsWith('title:')) {
+            deleteCacheEntriesForTrack(entry.trackId);
+          } else {
+            lyricsMemoryCache.delete(plainKey);
+          }
           return null;
         }
         // ONLY return plain-text lyrics, never timed/synced lyrics via title::artist lookup
@@ -223,19 +230,19 @@ export function setCachedLyrics(
   // If entry is synced and has NO recordingKey, timed/synced data MUST NOT become recording-authoritative cache data!
   if (!(entry.status === 'FOUND' && entry.synced && !entry.recordingKey)) {
     const recKeys = new Set<string>();
-    if (entry.recordingKey) {
+    if (entry.recordingKey && !entry.recordingKey.startsWith('title:')) {
       recKeys.add(`${CACHE_VERSION}:rec:${entry.recordingKey}`);
       const norm = makeRecordingKey(entry.recordingKey);
       if (norm) recKeys.add(`${CACHE_VERSION}:rec:${norm}`);
     }
-    if (entry.trackId) {
+    if (entry.trackId && !entry.trackId.startsWith('title:')) {
       if (!entry.synced || entry.recordingKey) {
         recKeys.add(`${CACHE_VERSION}:rec:${entry.trackId}`);
         const norm = makeRecordingKey(entry.trackId);
         if (norm) recKeys.add(`${CACHE_VERSION}:rec:${norm}`);
       }
     }
-    if (entry.canonicalTrackKey) {
+    if (entry.canonicalTrackKey && !entry.canonicalTrackKey.startsWith('title:')) {
       if (!entry.synced || entry.recordingKey) {
         recKeys.add(`${CACHE_VERSION}:rec:${entry.canonicalTrackKey}`);
         const norm = makeRecordingKey(entry.canonicalTrackKey);
@@ -254,31 +261,34 @@ export function setCachedLyrics(
     const cleanArtist = (artist || '').toLowerCase().split(/[,·•|&]/)[0].replace(/[^\w\s]/g, '').trim();
     if (cleanTitle) {
       const plainKey = `${CACHE_VERSION}:plain:${cleanTitle}::${cleanArtist}`;
-      if (!entry.synced || entry.syncQuality === 'NONE') {
-        lyricsMemoryCache.set(plainKey, entry);
-      } else {
-        const plainText = entry.plainText || (entry.lines.length > 0 ? entry.lines.map((l) => l.text).join('\n') : '');
-        if (plainText) {
-          // Strip timing when indexing under plain-text alias to guarantee zero timing contamination
-          const plainLines = plainText.split('\n').map((l) => l.trim()).filter(Boolean).map((text) => ({
+      const plainText = entry.plainText || (entry.lines.length > 0 ? entry.lines.map((l) => l.text).join('\n') : '');
+      const plainLines = plainText
+        ? plainText.split('\n').map((l) => l.trim()).filter(Boolean).map((text) => ({
             time: -1,
             endTime: -1,
             text,
             romanized: isDevanagari(text) ? devanagariToRoman(text) : undefined,
             words: [],
             isInstrumental: false,
+          }))
+        : entry.lines.map((l) => ({
+            time: -1,
+            endTime: -1,
+            text: l.text,
+            romanized: l.romanized || (isDevanagari(l.text) ? devanagariToRoman(l.text) : undefined),
+            words: [],
+            isInstrumental: false,
           }));
-          const strippedEntry: CachedLyrics = {
-            ...entry,
-            lines: plainLines,
-            synced: false,
-            syncQuality: 'NONE',
-            hasWordTiming: false,
-            provenance: null,
-          };
-          lyricsMemoryCache.set(plainKey, strippedEntry);
-        }
-      }
+
+      const strippedEntry: CachedLyrics = {
+        ...entry,
+        lines: plainLines,
+        synced: false,
+        syncQuality: 'NONE',
+        hasWordTiming: false,
+        provenance: null,
+      };
+      lyricsMemoryCache.set(plainKey, strippedEntry);
     }
   }
 
@@ -356,9 +366,10 @@ export async function fetchLyricsWithCache(params: {
   streamUrl?: string;
 }): Promise<CachedLyrics> {
   const songId = params.songId?.trim() || undefined;
+  const normalizedSongId = songId ? (makeRecordingKey(songId) || songId) : undefined;
   // NEVER treat lyricsId as recordingKey. lyricsId is only a resolver/provider parameter.
-  const inFlightKey = songId
-    ? `rec:${songId}`
+  const inFlightKey = normalizedSongId
+    ? `rec:${normalizedSongId}`
     : `title:${(params.title || '').trim()}::${(params.artist || '').trim()}`;
   const requestGeneration = getGeneration(inFlightKey);
 
@@ -376,9 +387,7 @@ export async function fetchLyricsWithCache(params: {
   }
 
   // 3. Network fetch
-  let cleanupPromise: Promise<CachedLyrics> | null = null;
   const fetchPromise: Promise<CachedLyrics> = (async (): Promise<CachedLyrics> => {
-    await Promise.resolve();
     try {
       if (!params.title || !params.title.trim()) {
         const notFoundDoc: CachedLyrics = {
@@ -626,17 +635,20 @@ export async function fetchLyricsWithCache(params: {
       setCachedLyrics(entry, params.title, params.artist);
       return entry;
     } finally {
-      if (inFlightRequests.get(inFlightKey) === cleanupPromise) {
-        inFlightRequests.delete(inFlightKey);
-        inFlightPromiseGeneration.delete(inFlightKey);
-      }
+      // Cleanup handled by fetchPromise.finally below
     }
   })();
 
-  cleanupPromise = fetchPromise;
-
   inFlightRequests.set(inFlightKey, fetchPromise);
   inFlightPromiseGeneration.set(inFlightKey, requestGeneration);
+
+  fetchPromise.finally(() => {
+    if (inFlightRequests.get(inFlightKey) === fetchPromise) {
+      inFlightRequests.delete(inFlightKey);
+      inFlightPromiseGeneration.delete(inFlightKey);
+    }
+  });
+
   return fetchPromise;
 }
 

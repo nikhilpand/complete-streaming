@@ -682,6 +682,103 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
     assert.equal(offsets['track_1'], undefined, 'oldest un-updated entry (track_1) must be evicted');
   });
 
+  test('old in-flight request cannot delete a newer in-flight request from inFlightRequests', async () => {
+    let fetchCount = 0;
+    let resolveP1!: (val: any) => void;
+    let resolveP2!: (val: any) => void;
+    const p1Wait = new Promise((r) => { resolveP1 = r; });
+    const p2Wait = new Promise((r) => { resolveP2 = r; });
+
+    const origFetch = globalThis.fetch;
+    (globalThis as any).fetch = async () => {
+      fetchCount++;
+      const currentCall = fetchCount;
+      if (currentCall === 1) {
+        await p1Wait;
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+          json: async () => ({
+            status: 'FOUND',
+            identity: { recordingKey: 'rec_old_req' },
+            lines: [{ time: 1, endTime: 2, text: 'Old Req' }],
+            syncQuality: 'LINE',
+          }),
+        };
+      }
+      // Call 2
+      await p2Wait;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+        json: async () => ({
+          status: 'FOUND',
+          identity: { recordingKey: 'rec_new_req' },
+          lines: [{ time: 3, endTime: 4, text: 'New Req' }],
+          syncQuality: 'LINE',
+        }),
+      };
+    };
+
+    try {
+      // 1. Launch request 1
+      const p1 = fetchLyricsWithCache({ songId: 'race_delete_track', title: 'Race Track' });
+
+      // 2. Invalidate request 1
+      invalidateLyricsCache('race_delete_track');
+
+      // 3. Launch request 2 while request 1 is still in-flight
+      const p2 = fetchLyricsWithCache({ songId: 'race_delete_track', title: 'Race Track' });
+      assert.equal(fetchCount, 2, 'Request 2 should have started as generation changed');
+
+      // 4. Resolve request 1 first
+      resolveP1(null);
+      await p1;
+
+      // 5. While request 2 is STILL in-flight, launch request 3.
+      // If request 1's finally() erroneously deleted request 2, request 3 would trigger fetchCount = 3!
+      const p3 = fetchLyricsWithCache({ songId: 'race_delete_track', title: 'Race Track' });
+      assert.equal(fetchCount, 2, 'Request 3 must deduplicate with active Request 2, not re-fetch');
+
+      // 6. Resolve request 2
+      resolveP2(null);
+      const res2 = await p2;
+      const res3 = await p3;
+
+      assert.equal(res2.lines[0].text, 'New Req');
+      assert.equal(res3.lines[0].text, 'New Req');
+      assert.ok(getCachedLyrics('race_delete_track'), 'Request 2 should have successfully populated cache');
+      assert.equal(getCachedLyrics('race_delete_track')?.lines[0].text, 'New Req');
+    } finally {
+      (globalThis as any).fetch = origFetch;
+    }
+  });
+
+  test('cached plain entry with mismatched engine version is rejected and purged', () => {
+    const stalePlain: CachedLyrics = {
+      trackId: 'title:stale song::stale artist',
+      lines: [{ time: -1, endTime: -1, text: 'Plain stale line', words: [] }],
+      provider: 'musixmatch',
+      syncQuality: 'NONE',
+      provenance: null,
+      hasHindiScript: false,
+      status: 'FOUND',
+      cachedAt: Date.now(),
+      expiresAt: Date.now() + 100000,
+      engineVersion: 'v3',
+      synced: false,
+    };
+
+    setCachedLyrics(stalePlain, 'Stale Song', 'Stale Artist');
+
+    // Query should fail because engineVersion !== CLIENT_ENGINE_VERSION
+    const res = getCachedLyrics(undefined, 'Stale Song', 'Stale Artist');
+    assert.equal(res, null, 'Plain entry with mismatched engine version must return null');
+    assert.equal(getCachedLyrics(undefined, 'Stale Song', 'Stale Artist'), null, 'Stale plain entry must be purged');
+  });
+
   test('ErrorBoundary handleReset calls onReset before clearing error state', () => {
     let resetCalled = false;
     let resetOrder = 0;

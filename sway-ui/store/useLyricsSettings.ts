@@ -85,16 +85,17 @@ export function getSettingsStorageKey(): string {
 }
 
 const accountScopedStorage = {
-  getItem: (_name: string): string | null => {
-    if (typeof window === 'undefined') return null;
+  getItem: (): string | null => {
+    if (typeof window === 'undefined' && typeof localStorage === 'undefined') return null;
     return localStorage.getItem(getSettingsStorageKey());
   },
   setItem: (_name: string, value: string): void => {
-    if (typeof window === 'undefined') return;
+    void _name;
+    if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
     localStorage.setItem(getSettingsStorageKey(), value);
   },
-  removeItem: (_name: string): void => {
-    if (typeof window === 'undefined') return;
+  removeItem: (): void => {
+    if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
     localStorage.removeItem(getSettingsStorageKey());
   },
 };
@@ -278,10 +279,25 @@ export const getUserId = () => {
 
 let currentActiveUserId = getUserId();
 let isHydrating = false;
+let syncTimer: any = null;
 
 export function switchAccount(newUserId?: string) {
   const nextId = newUserId || getUserId();
   currentActiveUserId = nextId;
+
+  if (typeof window !== 'undefined' || typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem('sway_account_id', nextId);
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Cancel any pending sync PATCH from the previous account immediately
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
 
   // 1. Old account settings must NOT remain active
   let loadedState: any = null;
@@ -296,6 +312,9 @@ export function switchAccount(newUserId?: string) {
       // Ignore parse error
     }
   }
+
+  // Flag hydration to prevent triggering an immediate spurious PATCH for the loaded local state
+  isHydrating = true;
 
   // Replace existing store state with the new account's settings
   useLyricsSettings.setState({ ...DEFAULT_SETTINGS, ...(loadedState || {}) });
@@ -322,6 +341,12 @@ export function hydrateCloudSettings(targetUserId?: string): Promise<void> {
         useLyricsSettings.setState((prev) => {
           const mergedOffsets = { ...prev.perTrackSyncOffset, ...(s.perTrackSyncOffset || {}) };
           const mergedTimestamps = { ...(prev.perTrackSyncOffsetUpdatedAt || {}) };
+          const now = Date.now();
+          for (const k of Object.keys(mergedOffsets)) {
+            if (mergedTimestamps[k] === undefined) {
+              mergedTimestamps[k] = now;
+            }
+          }
           const keys = Object.keys(mergedOffsets);
           if (keys.length > 200) {
             const sortedKeys = keys.sort((a, b) => (mergedTimestamps[a] ?? 0) - (mergedTimestamps[b] ?? 0));
@@ -392,7 +417,6 @@ if (typeof window !== 'undefined') {
     }
   }, 1000);
 
-  let syncTimer: any = null;
   useLyricsSettings.subscribe((state) => {
     if (isHydrating) return;
     const currentId = getUserId();
@@ -401,11 +425,13 @@ if (typeof window !== 'undefined') {
       return;
     }
 
+    const accountAtSubscribe = currentId;
+
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = setTimeout(() => {
       // Backend PATCH must use the current account ID at time of PATCH
       const activeIdAtPatch = getUserId();
-      if (activeIdAtPatch !== currentActiveUserId) return;
+      if (activeIdAtPatch !== accountAtSubscribe || activeIdAtPatch !== currentActiveUserId) return;
 
       fetch(`/api/proxy/users/${activeIdAtPatch}/settings`, {
         method: 'PATCH',
