@@ -40,6 +40,14 @@ def _try_load_separator():
             output_format="mp3",
             normalization_threshold=0.9,
             amplification_threshold=0.6,
+            use_directml=True,
+            mdx_params={
+                "hop_length": 1024,
+                "segment_size": 256,
+                "overlap": 0.20,
+                "batch_size": 4,
+                "enable_denoise": False,
+            },
             log_level=logging.WARNING,
         )
         # Download / verify the model; this blocks but only runs once
