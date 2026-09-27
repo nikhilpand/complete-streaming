@@ -15,6 +15,10 @@
   --art-secondary: rgba(124, 124, 255, 0.55);
   --art-accent: rgba(124, 124, 255, 0.22);
   --art-wash: rgba(124, 124, 255, 0.07);
+  --art-primary-raw: 124, 124, 255;
+  --art-r: 124;
+  --art-g: 124;
+  --art-b: 255;
   --art-h: 240;
   --art-s: 60%;
   --art-l: 65%;

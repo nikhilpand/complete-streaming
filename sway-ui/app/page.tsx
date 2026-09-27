@@ -7,6 +7,7 @@ import { SongRow } from '@/components/music/SongRow';
 import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { artistNames } from '@/lib/utils';
 import type { Song } from '@/lib/api/types';
 
@@ -48,9 +49,9 @@ function sanitizeShelves(shelves: HomeShelfData[]): HomeShelfData[] {
       const seenTitles = new Set<string>();
       const validItems = (s.items || []).filter((t) => {
         if (
-          !t.artwork_url ||
-          t.artwork_url.trim() === '' ||
+          !t.id ||
           !t.title ||
+          t.title.trim() === '' ||
           t.title.toLowerCase().startsWith('track ') ||
           t.title.toLowerCase().startsWith('sample track') ||
           (t as any).artist_name?.toLowerCase() === 'unknown artist' ||
@@ -103,7 +104,7 @@ export default function HomePage() {
   // When a track starts playing: add to recently played + schedule home feed refresh
   useEffect(() => {
     if (!currentTrack || currentTrack.id === lastRecordedIdRef.current) return;
-    if (status !== 'playing' && status !== 'loading') return;
+    if (status !== 'playing') return;
 
     lastRecordedIdRef.current = currentTrack.id;
     const updated = addRecentlyPlayed(currentTrack);
@@ -136,12 +137,12 @@ export default function HomePage() {
     try {
       const feed = await getHomeFeed(sig);
       if (sig.aborted) return;
-      if (feed?.shelves?.length > 0) {
+      if (feed?.shelves) {
         setShelves(feed.shelves);
         if (feed.state) setFeedState(feed.state);
         return;
       }
-      throw new Error('No shelves returned');
+      setShelves([]);
     } catch (e: unknown) {
       if ((e as Error)?.name === 'AbortError') return;
       setError("Couldn't load content. Please try again.");
@@ -171,6 +172,17 @@ export default function HomePage() {
 
   // Classify subsequent shelves by type for layout decisions
   const subsequentShelves = sanitizedShelves.slice(1);
+
+  if (!loading && sanitizedShelves.length === 0 && !currentTrack && (!recentlyPlayed || recentlyPlayed.length <= 1)) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <EmptyState
+          title="No recommendations yet"
+          description="Play a few songs or search for your favorite artists to start discovering personalized music."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 sm:px-6 md:px-8 py-6 sm:py-10 max-w-7xl mx-auto space-y-10 sm:space-y-14">
@@ -346,7 +358,12 @@ export default function HomePage() {
             ))}
           </section>
         </>
-      ) : null}
+      ) : (
+        <EmptyState
+          title="No recommendations yet"
+          description="Play a few songs or search for your favorite artists to start discovering personalized music."
+        />
+      )}
 
       {/* ── Subsequent Shelves (adaptive layout by type) ─────────────────── */}
       {!loading &&

@@ -645,7 +645,7 @@ export default function SettingsPage() {
 
           <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
             <span className="text-white/60">Stream Fidelity</span>
-            <span className="font-semibold text-white/90">320 kbps (Lossless HQ)</span>
+            <span className="font-semibold text-white/90">Up to 320 kbps (High Quality)</span>
           </div>
         </div>
       </div>

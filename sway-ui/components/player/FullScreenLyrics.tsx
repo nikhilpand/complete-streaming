@@ -804,7 +804,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       className={`album-art shrink-0 overflow-hidden relative group w-full aspect-square ${roundedClass}`}
       style={{
         maxWidth: `${maxSize}px`,
-        boxShadow: '0 32px 80px -12px rgba(var(--art-r, 0), var(--art-g, 0), var(--art-b, 0), 0.5)'
+        boxShadow: '0 32px 80px -12px rgba(var(--art-r, 124), var(--art-g, 124), var(--art-b, 255), 0.5)'
       }}
     >
       <AnimatePresence mode="popLayout" initial={false}>

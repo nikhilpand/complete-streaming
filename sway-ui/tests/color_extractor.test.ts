@@ -64,6 +64,10 @@ describe('ColorExtractor Hardcore Edge Cases', () => {
     assert.equal(styleMap.get('--art-s'), '60%');
     assert.equal(styleMap.get('--art-l'), '49%');
     assert.equal(styleMap.get('--art-bg-main'), 'hsl(0, 30%, 7%)');
+    assert.equal(styleMap.get('--art-primary-raw'), '200, 50, 50');
+    assert.equal(styleMap.get('--art-r'), '200');
+    assert.equal(styleMap.get('--art-g'), '50');
+    assert.equal(styleMap.get('--art-b'), '50');
   });
 
   test('applyPalette clamps low saturation for --art-s to at least 20%', () => {

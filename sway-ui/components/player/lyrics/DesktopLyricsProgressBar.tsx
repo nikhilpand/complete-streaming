@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useState, useRef, useCallback, useEffect } from 'react';
+import React, { memo, useState, useRef, useCallback } from 'react';
 import { usePlayerStore } from '@/store/playerStore';
 import { formatSecs } from '@/lib/utils';
 
@@ -54,6 +54,48 @@ export const DesktopLyricsProgressBar = memo(({
   const currentProgress = duration > 0 ? (currentDisplayTime / duration) * 100 : 0;
   const bufferedProgress = duration > 0 ? (bufferedTime / duration) * 100 : 0;
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (duration <= 0) return;
+    const step = 5; // 5s step for arrows
+    const bigStep = 15; // 15s step for page up/down
+    let newTime: number | null = null;
+
+    switch (e.key) {
+      case 'ArrowLeft':
+      case 'ArrowDown':
+        e.preventDefault();
+        newTime = Math.max(0, currentDisplayTime - step);
+        break;
+      case 'ArrowRight':
+      case 'ArrowUp':
+        e.preventDefault();
+        newTime = Math.min(duration, currentDisplayTime + step);
+        break;
+      case 'PageDown':
+        e.preventDefault();
+        newTime = Math.max(0, currentDisplayTime - bigStep);
+        break;
+      case 'PageUp':
+        e.preventDefault();
+        newTime = Math.min(duration, currentDisplayTime + bigStep);
+        break;
+      case 'Home':
+        e.preventDefault();
+        newTime = 0;
+        break;
+      case 'End':
+        e.preventDefault();
+        newTime = duration;
+        break;
+      default:
+        break;
+    }
+
+    if (newTime !== null) {
+      seekTo(newTime);
+    }
+  }, [currentDisplayTime, duration, seekTo]);
+
   return (
     <div className={`hidden lg:flex items-center gap-3 w-full select-none ${className || 'max-w-[380px]'}`}>
       <span className="text-[11px] font-mono font-medium text-white/50 tabular-nums shrink-0 w-8 text-right">
@@ -61,8 +103,16 @@ export const DesktopLyricsProgressBar = memo(({
       </span>
       <div
         ref={trackRef}
+        role="slider"
+        tabIndex={0}
+        aria-label="Seek playback position"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(duration)}
+        aria-valuenow={Math.round(currentDisplayTime)}
+        aria-valuetext={formatSecs(currentDisplayTime)}
+        onKeyDown={handleKeyDown}
         onMouseDown={handleMouseDown}
-        className={`blyrics-progress-track flex-1 group cursor-pointer ${isSeeking ? 'is-seeking' : ''}`}
+        className={`blyrics-progress-track flex-1 group cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 ${isSeeking ? 'is-seeking' : ''}`}
       >
         <div className="blyrics-progress-buffered" style={{ width: `${Math.min(100, bufferedProgress)}%` }} />
         <div className="blyrics-progress-fill" style={{ width: `${Math.min(100, currentProgress)}%` }} />
@@ -79,4 +129,3 @@ export const DesktopLyricsProgressBar = memo(({
 });
 
 DesktopLyricsProgressBar.displayName = 'DesktopLyricsProgressBar';
-

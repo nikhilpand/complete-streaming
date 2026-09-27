@@ -216,13 +216,52 @@ export const useLyricsSettings = create<LyricsSettingsState>()(
   )
 );
 
-// Auto-sync lyrics preferences to backend
+// Auto-sync lyrics preferences to/from backend
 if (typeof window !== 'undefined') {
+  const getUserId = () => localStorage.getItem('sway_account_id') || 'guest_user';
+  let isHydrating = true;
+
+  // Hydrate initial cloud-persisted settings
+  fetch(`/api/proxy/users/${getUserId()}/settings`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (data?.settings && typeof data.settings === 'object') {
+        const s = data.settings;
+        useLyricsSettings.setState((prev) => ({
+          ...prev,
+          ...(s.fontSize && { fontSize: s.fontSize }),
+          ...(s.lineHeight && { lineHeight: s.lineHeight }),
+          ...(s.fontFamily && { fontFamily: s.fontFamily }),
+          ...(s.contrast && { contrast: s.contrast }),
+          ...(s.blur && { blur: s.blur }),
+          ...(s.align && { align: s.align }),
+          ...(s.showAccentBar !== undefined && { showAccentBar: s.showAccentBar }),
+          ...(s.showRomanized !== undefined && { showRomanized: s.showRomanized }),
+          ...(s.layoutMode && { layoutMode: s.layoutMode }),
+          ...(s.stageMode && { stageMode: s.stageMode }),
+          ...(s.motionBackground && { motionBackground: s.motionBackground }),
+          ...(s.globalSyncOffsetMs !== undefined && { globalSyncOffsetMs: s.globalSyncOffsetMs }),
+          ...(s.perTrackSyncOffset && { perTrackSyncOffset: { ...prev.perTrackSyncOffset, ...s.perTrackSyncOffset } }),
+          ...(s.backgroundStyle && { backgroundStyle: s.backgroundStyle }),
+          ...(s.showInstrumentalCountdown !== undefined && { showInstrumentalCountdown: s.showInstrumentalCountdown }),
+          ...(s.karaokeEffect && { karaokeEffect: s.karaokeEffect }),
+        }));
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      // Delay disabling hydration flag to allow setState subscriber cycles to settle
+      setTimeout(() => {
+        isHydrating = false;
+      }, 100);
+    });
+
   let syncTimer: any = null;
   useLyricsSettings.subscribe((state) => {
+    if (isHydrating) return;
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = setTimeout(() => {
-      fetch('/api/proxy/users/guest_user/settings', {
+      fetch(`/api/proxy/users/${getUserId()}/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -236,6 +275,10 @@ if (typeof window !== 'undefined') {
             showAccentBar: state.showAccentBar,
             showRomanized: state.showRomanized,
             layoutMode: state.layoutMode,
+            stageMode: state.stageMode,
+            motionBackground: state.motionBackground,
+            globalSyncOffsetMs: state.globalSyncOffsetMs,
+            perTrackSyncOffset: state.perTrackSyncOffset,
             backgroundStyle: state.backgroundStyle,
             showInstrumentalCountdown: state.showInstrumentalCountdown,
             karaokeEffect: state.karaokeEffect,

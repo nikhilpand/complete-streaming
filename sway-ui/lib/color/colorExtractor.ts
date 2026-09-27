@@ -73,21 +73,19 @@ export function applyPalette(p: Palette) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
 
-  // Boost saturation + ensure luminance is in readable range for dark backgrounds
-  const s = Math.min(90, Math.max(45, p.s + 20));
-  const l = Math.min(75, Math.max(55, p.l + 20)); // Always bright enough
-  const primaryVibrant = `hsl(${p.h}, ${s}%, ${l}%)`;
-
-  root.style.setProperty('--art-primary', primaryVibrant);
-  root.style.setProperty('--art-secondary', `hsla(${p.h}, ${s}%, ${Math.min(60, l)}%, 0.6)`);
-  root.style.setProperty('--art-accent', `hsla(${p.h}, ${s}%, ${l}%, 0.22)`);
-  root.style.setProperty('--art-wash', `hsla(${p.h}, ${s}%, ${l}%, 0.07)`);
+  root.style.setProperty('--art-primary', p.primary);
+  root.style.setProperty('--art-secondary', `rgba(${p.r},${p.g},${p.b},0.7)`);
+  root.style.setProperty('--art-accent', `rgba(${p.r},${p.g},${p.b},0.35)`);
+  root.style.setProperty('--art-wash', `rgba(${p.r},${p.g},${p.b},0.08)`);
   root.style.setProperty('--art-h', String(p.h));
-  root.style.setProperty('--art-s', `${s}%`);
-  root.style.setProperty('--art-l', `${l}%`);
-  root.style.setProperty('--art-bg-main', `hsl(${p.h}, ${Math.min(25, p.s)}%, 6%)`);
-  // Raw RGB for use in box-shadow rgba()
+  root.style.setProperty('--art-s', `${Math.max(20, p.s)}%`);
+  root.style.setProperty('--art-l', `${p.l}%`);
+  root.style.setProperty('--art-bg-main', `hsl(${p.h}, ${Math.min(30, p.s)}%, 7%)`);
+  // Canonical raw RGB for use in box-shadow and rgba() compositing
   root.style.setProperty('--art-primary-raw', `${p.r}, ${p.g}, ${p.b}`);
+  root.style.setProperty('--art-r', String(p.r));
+  root.style.setProperty('--art-g', String(p.g));
+  root.style.setProperty('--art-b', String(p.b));
 }
 
 export function scheduleExtract(url: string, done: (p: Palette) => void) {
