@@ -47,5 +47,5 @@ export async function pollKaraokeStatus(trackId: string): Promise<KaraokeInfo> {
 }
 
 export function getStemStreamUrl(trackId: string, stem: 'vocals' | 'instrumental'): string {
-  return `/api/proxy/karaoke/${encodeURIComponent(trackId)}/stream/${stem}`;
+  return `/api/proxy/karaoke/${encodeURIComponent(trackId)}/stream/${stem}?v=2`;
 }

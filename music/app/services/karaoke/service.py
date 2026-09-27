@@ -149,12 +149,31 @@ async def _run_separation(
         rec.progress = 0.35
         await karaoke_cache.upsert(rec)
 
-        # Step 3: Run separation in thread (CPU-bound)
-        stems = await asyncio.to_thread(
-            sep_module.separate_stems,
-            tmp_wav,
-            track_id,
-        )
+        # Step 3: Run separation in thread with smooth progress updates
+        stop_progress = asyncio.Event()
+
+        async def _advance_progress():
+            curr = 0.35
+            while not stop_progress.is_set() and curr < 0.95:
+                await asyncio.sleep(2.5)
+                if stop_progress.is_set():
+                    break
+                curr = min(0.95, round(curr + 0.03, 2))
+                r = await karaoke_cache.get(track_id)
+                if r and r.status == KaraokeStatus.PROCESSING:
+                    r.progress = curr
+                    await karaoke_cache.upsert(r)
+
+        progress_task = asyncio.create_task(_advance_progress())
+        try:
+            stems = await asyncio.to_thread(
+                sep_module.separate_stems,
+                tmp_wav,
+                track_id,
+            )
+        finally:
+            stop_progress.set()
+            await progress_task
 
         rec.status = KaraokeStatus.READY
         rec.progress = 1.0

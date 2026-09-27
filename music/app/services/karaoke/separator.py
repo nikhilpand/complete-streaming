@@ -97,25 +97,25 @@ def separate_stems(audio_path: str, output_prefix: str) -> dict[str, str]:
         raise RuntimeError(f"Separation returned unexpected outputs: {output_files}")
 
     # audio-separator returns files in output_dir; identify them
-    # Convention: one file contains 'Vocals', other contains 'Instrumental'
+    # Filenames contain '(Instrumental)' and '(Vocals)'
     vocals_path = None
     instrumental_path = None
     for f in output_files:
         full_path = str((STEMS_DIR / f).resolve()) if not os.path.isabs(f) else str(Path(f).resolve())
         fname = os.path.basename(f).lower()
-        if "vocal" in fname:
-            vocals_path = full_path
-        elif "instrument" in fname or "no_vocals" in fname or "accompaniment" in fname:
+        # Note: Model name is 'Kim_Vocal_2', so we must check for '(instrumental)' or 'instrument'
+        if "(instrumental)" in fname or "instrument" in fname.replace("kim_vocal", ""):
             instrumental_path = full_path
+        elif "(vocals)" in fname or "vocal" in fname.replace("kim_vocal", ""):
+            vocals_path = full_path
 
     if not vocals_path or not instrumental_path:
-        # Fallback: first=vocals, second=instrumental by convention
-        if len(output_files) >= 2:
-            f0 = str((STEMS_DIR / output_files[0]).resolve()) if not os.path.isabs(output_files[0]) else str(Path(output_files[0]).resolve())
-            f1 = str((STEMS_DIR / output_files[1]).resolve()) if not os.path.isabs(output_files[1]) else str(Path(output_files[1]).resolve())
-            vocals_path = f0
-            instrumental_path = f1
-        else:
-            raise RuntimeError(f"Cannot identify vocals/instrumental from: {output_files}")
+        for f in output_files:
+            full_path = str((STEMS_DIR / f).resolve()) if not os.path.isabs(f) else str(Path(f).resolve())
+            fname = os.path.basename(f).lower()
+            if "instrument" in fname:
+                instrumental_path = full_path
+            elif "vocal" in fname:
+                vocals_path = full_path
 
     return {"vocals": str(vocals_path), "instrumental": str(instrumental_path)}
