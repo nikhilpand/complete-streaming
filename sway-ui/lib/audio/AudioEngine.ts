@@ -25,6 +25,48 @@ interface AudioPipeline {
   isLoaded: boolean;
 }
 
+class SsrTimeRanges implements TimeRanges {
+  constructor(private ranges: Array<{ start: number; end: number }> = [{ start: 0, end: 180 }]) {}
+  get length() { return this.ranges.length; }
+  start(index: number) { return this.ranges[index]?.start ?? 0; }
+  end(index: number) { return this.ranges[index]?.end ?? 0; }
+}
+
+class SsrAudioElement extends EventTarget implements Partial<HTMLAudioElement> {
+  public src = '';
+  public preload: '' | 'none' | 'auto' | 'metadata' = 'auto';
+  public volume = 0.8;
+  public muted = false;
+  public currentTime = 0;
+  public duration = 180;
+  public paused = true;
+  public ended = false;
+  public readyState = 4; // HAVE_ENOUGH_DATA
+  public buffered: TimeRanges = new SsrTimeRanges();
+  public error: MediaError | null = null;
+  public crossOrigin: string | null = 'anonymous';
+
+  public async play(): Promise<void> {
+    this.paused = false;
+    this.ended = false;
+    this.dispatchEvent(new Event('play'));
+    setTimeout(() => {
+      if (!this.paused) {
+        this.dispatchEvent(new Event('playing'));
+      }
+    }, 0);
+  }
+
+  public pause(): void {
+    this.paused = true;
+    this.dispatchEvent(new Event('pause'));
+  }
+
+  public load(): void {
+    this.dispatchEvent(new Event('canplay'));
+  }
+}
+
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
   private pipelines: [AudioPipeline, AudioPipeline] | null = null;
@@ -39,6 +81,10 @@ export class AudioEngine {
   private rafId: number | null = null;
   private isTransitioning = false;
   private transitionTimer: ReturnType<typeof setTimeout> | null = null;
+  private transitionWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private transitionGeneration = 0;
+  public transitionConfirmTimeoutMs = 1200;
+  private repeatMode: 'none' | 'one' | 'all' = 'none';
 
   private userVolume = getSavedVolume(0.8);
   private userMuted = getSavedMuted(false);
@@ -58,26 +104,19 @@ export class AudioEngine {
 
     if (typeof window === 'undefined') {
       // Mock pipelines for SSR / Node environment
-      const createMockAudio = () =>
-        ({
-          volume: this.userVolume,
-          muted: this.userMuted,
-          currentTime: 0,
-          duration: 0,
-          paused: true,
-          ended: false,
-          src: '',
-          buffered: { length: 0, start: () => 0, end: () => 0 } as unknown as TimeRanges,
-          play: async () => {},
-          pause: () => {},
-          load: () => {},
-          addEventListener: () => {},
-          removeEventListener: () => {},
-        } as unknown as HTMLAudioElement);
+      const audioA = new SsrAudioElement() as unknown as HTMLAudioElement;
+      const audioB = new SsrAudioElement() as unknown as HTMLAudioElement;
+      audioA.volume = this.userVolume;
+      audioB.volume = this.userVolume;
+      audioA.muted = this.userMuted;
+      audioB.muted = this.userMuted;
+
+      this.wirePipelineEvents(audioA, 'A');
+      this.wirePipelineEvents(audioB, 'B');
 
       this.pipelines = [
-        { id: 'A', audio: createMockAudio(), sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
-        { id: 'B', audio: createMockAudio(), sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
+        { id: 'A', audio: audioA, sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
+        { id: 'B', audio: audioB, sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
       ];
       return this.pipelines[this.activePipelineIndex].audio;
     }
@@ -185,14 +224,14 @@ export class AudioEngine {
 
   private wirePipelineEvents(audio: HTMLAudioElement, pipeId: 'A' | 'B') {
     audio.addEventListener('play', () => {
-      if (this.isCurrentPipeline(pipeId)) {
+      if (this.isCurrentPipeline(pipeId) && !this.isTransitioning) {
         this.emit({ type: 'play' });
         this.startRaf();
       }
     });
 
     audio.addEventListener('playing', () => {
-      if (this.isCurrentPipeline(pipeId)) {
+      if (this.isCurrentPipeline(pipeId) && !this.isTransitioning) {
         this.emit({ type: 'play' });
         this.startRaf();
       }
@@ -206,21 +245,26 @@ export class AudioEngine {
     });
 
     audio.addEventListener('ended', () => {
-      if (this.isCurrentPipeline(pipeId)) {
-        const standby = this.standbyPipeline;
-        if (standby.isLoaded && standby.audio.src) {
-          // Gapless atomic swap to prebuffered standby track
-          const fromTrack = this.activePipeline.trackId || undefined;
-          const toTrack = standby.trackId || undefined;
-          this.emit({ type: 'transition_start', fromTrackId: fromTrack, toTrackId: toTrack });
-          standby.audio.play().catch(() => {});
-          this.activePipelineIndex = 1 - this.activePipelineIndex;
-          this.emit({ type: 'transition_end', trackId: toTrack });
-          return;
-        }
+      if (!this.isCurrentPipeline(pipeId)) return;
+
+      // Invariant: If repeatMode is 'one', never automatic transition to standby
+      if (this.repeatMode === 'one') {
+        this.clearStandby();
         this.emit({ type: 'ended' });
         this.stopRaf();
+        return;
       }
+
+      const standby = this.standbyPipeline;
+      if (this.hasUsableBuffer(standby, 0.5) && !this.isTransitioning) {
+        this.executeGaplessTransition(standby);
+        return;
+      }
+
+      // Standby not usable or already transitioning -> clean fallback to ended
+      this.clearStandby();
+      this.emit({ type: 'ended' });
+      this.stopRaf();
     });
 
     audio.addEventListener('volumechange', () => {
@@ -230,7 +274,7 @@ export class AudioEngine {
     });
 
     audio.addEventListener('waiting', () => {
-      if (this.isCurrentPipeline(pipeId)) {
+      if (this.isCurrentPipeline(pipeId) && !this.isTransitioning) {
         this.emit({ type: 'loading' });
       }
     });
@@ -248,7 +292,7 @@ export class AudioEngine {
     });
 
     audio.addEventListener('error', () => {
-      if (this.isCurrentPipeline(pipeId)) {
+      if (this.isCurrentPipeline(pipeId) && !this.isTransitioning) {
         const code = audio.error?.code;
         const messages: Record<number, string> = {
           1: 'Playback aborted',
@@ -308,12 +352,22 @@ export class AudioEngine {
     }
   }
 
+  private normalizeUrl(url: string): string {
+    if (typeof window !== 'undefined' && url) {
+      if ((url.includes('googlevideo.com') || url.includes('youtube.com')) && !url.includes('/api/proxy/stream')) {
+        return `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+      }
+    }
+    return url;
+  }
+
   // ── Playback Controls ──
   public async load(url: string, trackId?: string): Promise<void> {
     const pipeline = this.activePipeline;
     pipeline.trackId = trackId || null;
-    if (pipeline.audio.src !== url) {
-      pipeline.audio.src = url;
+    const safeUrl = this.normalizeUrl(url);
+    if (pipeline.audio.src !== safeUrl) {
+      pipeline.audio.src = safeUrl;
       pipeline.isLoaded = true;
     }
   }
@@ -324,8 +378,9 @@ export class AudioEngine {
   public preload(url: string, trackId?: string) {
     const standby = this.standbyPipeline;
     standby.trackId = trackId || null;
-    if (standby.audio.src !== url) {
-      standby.audio.src = url;
+    const safeUrl = this.normalizeUrl(url);
+    if (standby.audio.src !== safeUrl) {
+      standby.audio.src = safeUrl;
       standby.audio.load();
       standby.isLoaded = true;
       if (standby.gainNode && this.audioContext) {
@@ -400,9 +455,147 @@ export class AudioEngine {
     this.emit({ type: 'volumechange', volume: this.userVolume, muted: m });
   }
 
+  // ── Standby & Transition Management ──
+  public setRepeatMode(mode: 'none' | 'one' | 'all'): void {
+    this.repeatMode = mode;
+  }
+
+  public getRepeatMode(): 'none' | 'one' | 'all' {
+    return this.repeatMode;
+  }
+
+  public hasUsableBuffer(pipeline: AudioPipeline, requiredSeconds = 0.5): boolean {
+    if (!pipeline.isLoaded || !pipeline.audio.src) return false;
+    const a = pipeline.audio;
+    const readyState = typeof a.readyState === 'number' ? a.readyState : 4;
+    // Condition 1: readyState must be at least HAVE_FUTURE_DATA (3)
+    if (readyState < 3) return false;
+
+    // Condition 2: bufferedAhead must meet required threshold
+    const cur = a.currentTime || 0;
+    let maxEnd = 0;
+    try {
+      if (a.buffered && a.buffered.length > 0) {
+        for (let i = 0; i < a.buffered.length; i++) {
+          if (a.buffered.start(i) <= cur + 0.1 && a.buffered.end(i) > maxEnd) {
+            maxEnd = a.buffered.end(i);
+          }
+        }
+      }
+    } catch {}
+
+    const bufferedAhead = Math.max(0, maxEnd - cur);
+    if (a.buffered && a.buffered.length > 0) {
+      return bufferedAhead >= requiredSeconds;
+    }
+    return readyState >= 3;
+  }
+
+  public clearStandby(): void {
+    if (!this.pipelines) return;
+    const standby = this.pipelines[1 - this.activePipelineIndex];
+    standby.audio.pause();
+    standby.audio.currentTime = 0;
+    standby.trackId = null;
+    standby.isLoaded = false;
+    standby.audio.src = '';
+    if (standby.gainNode && this.audioContext) {
+      standby.gainNode.gain.cancelScheduledValues(this.audioContext.currentTime);
+      standby.gainNode.gain.setValueAtTime(0.0, this.audioContext.currentTime);
+    }
+  }
+
+  private executeGaplessTransition(standby: AudioPipeline): void {
+    if (this.isTransitioning) return;
+    this.isTransitioning = true;
+    const gen = ++this.transitionGeneration;
+    const active = this.activePipeline;
+    const fromTrack = active.trackId || undefined;
+    const toTrack = standby.trackId || undefined;
+    const activeIndex = this.activePipelineIndex;
+    const standbyIndex = 1 - this.activePipelineIndex;
+
+    this.emit({ type: 'transition_start', fromTrackId: fromTrack, toTrackId: toTrack });
+
+    let resolved = false;
+
+    const cleanup = () => {
+      resolved = true;
+      if (this.transitionWatchdogTimer !== null) {
+        clearTimeout(this.transitionWatchdogTimer);
+        this.transitionWatchdogTimer = null;
+      }
+      standby.audio.removeEventListener('playing', onPlaying);
+      standby.audio.removeEventListener('error', onError);
+    };
+
+    const onPlaying = () => {
+      if (resolved || gen !== this.transitionGeneration) return;
+      cleanup();
+
+      // Atomic swap upon confirmed playback!
+      this.activePipelineIndex = standbyIndex;
+      const oldPipeline = this.pipelines![activeIndex];
+      oldPipeline.audio.pause();
+      oldPipeline.audio.currentTime = 0;
+      oldPipeline.trackId = null;
+      oldPipeline.isLoaded = false;
+      oldPipeline.audio.src = '';
+
+      if (this.audioContext) {
+        const now = this.audioContext.currentTime;
+        if (oldPipeline.gainNode) {
+          oldPipeline.gainNode.gain.cancelScheduledValues(now);
+          oldPipeline.gainNode.gain.setValueAtTime(0.0, now);
+        }
+        if (this.activePipeline.gainNode) {
+          this.activePipeline.gainNode.gain.cancelScheduledValues(now);
+          this.activePipeline.gainNode.gain.setValueAtTime(1.0, now);
+        }
+      }
+
+      this.isTransitioning = false;
+      this.emit({ type: 'transition_end', trackId: toTrack });
+      this.startRaf();
+    };
+
+    const onError = (err?: any) => {
+      if (resolved || gen !== this.transitionGeneration) return;
+      cleanup();
+      // Standby failed to start -> clean fallback to standard ended path
+      this.clearStandby();
+      this.isTransitioning = false;
+      this.emit({ type: 'ended' });
+      this.stopRaf();
+    };
+
+    standby.audio.addEventListener('playing', onPlaying, { once: true });
+    standby.audio.addEventListener('error', onError, { once: true });
+
+    this.transitionWatchdogTimer = setTimeout(() => {
+      if (resolved || gen !== this.transitionGeneration) return;
+      onError(new Error('Standby transition watchdog expired'));
+    }, this.transitionConfirmTimeoutMs);
+
+    standby.audio.play().catch((err: unknown) => {
+      const e = err as Error;
+      if (e?.name === 'NotAllowedError') {
+        if (resolved || gen !== this.transitionGeneration) return;
+        cleanup();
+        this.clearStandby();
+        this.isTransitioning = false;
+        this.emit({ type: 'pause' });
+        this.stopRaf();
+        return;
+      }
+      onError(err);
+    });
+  }
+
   // ── Sprint 4: Crossfade & Seamless Pipeline Swap ──
   public async crossfadeToStandby(durationSec?: number): Promise<void> {
     if (!this.pipelines || this.isTransitioning) return;
+    if (this.repeatMode === 'one') return;
 
     const crossfadeDur =
       durationSec !== undefined
@@ -412,64 +605,102 @@ export class AudioEngine {
     const active = this.activePipeline;
     const standby = this.standbyPipeline;
 
-    if (!standby.isLoaded || !standby.audio.src) {
-      // Standby not preloaded, standard ended trigger
-      this.emit({ type: 'ended' });
+    // Invariant: Verify standby has usable buffer ahead (crossfade duration + safety margin)
+    if (!this.hasUsableBuffer(standby, crossfadeDur + 0.5)) {
       return;
     }
 
     if (crossfadeDur <= 0 || !this.audioContext || !active.gainNode || !standby.gainNode) {
-      // Gapless transition: instant swap (0 delay)
-      this.isTransitioning = true;
-      try {
-        await standby.audio.play();
-      } catch {}
-      active.audio.pause();
-      active.audio.currentTime = 0;
-      this.activePipelineIndex = 1 - this.activePipelineIndex;
-      this.isTransitioning = false;
-      this.emit({ type: 'play' });
+      // Gapless transition
+      this.executeGaplessTransition(standby);
       return;
     }
 
     // Dual GainNode linear crossfade
     this.isTransitioning = true;
+    const gen = ++this.transitionGeneration;
     const ctx = this.audioContext;
     const now = ctx.currentTime;
     const fromTrack = active.trackId || undefined;
     const toTrack = standby.trackId || undefined;
+    const activeIndex = this.activePipelineIndex;
+    const standbyIndex = 1 - this.activePipelineIndex;
 
     this.emit({ type: 'transition_start', fromTrackId: fromTrack, toTrackId: toTrack });
 
-    // Ensure standby begins muted and starts playing
+    // Ensure standby starts playing with 0 initial gain
     standby.gainNode.gain.cancelScheduledValues(now);
     standby.gainNode.gain.setValueAtTime(0.0001, now);
-    try {
-      await standby.audio.play();
-    } catch {}
 
-    // Ramp active down and standby up
-    active.gainNode.gain.cancelScheduledValues(now);
-    active.gainNode.gain.setValueAtTime(active.gainNode.gain.value, now);
-    active.gainNode.gain.linearRampToValueAtTime(0.0001, now + crossfadeDur);
+    let resolved = false;
 
-    standby.gainNode.gain.linearRampToValueAtTime(1.0, now + crossfadeDur);
-
-    this.transitionTimer = setTimeout(() => {
-      active.audio.pause();
-      active.audio.currentTime = 0;
-      if (active.gainNode && this.audioContext) {
-        active.gainNode.gain.setValueAtTime(0.0, this.audioContext.currentTime);
+    const cleanup = () => {
+      resolved = true;
+      if (this.transitionWatchdogTimer !== null) {
+        clearTimeout(this.transitionWatchdogTimer);
+        this.transitionWatchdogTimer = null;
       }
-      this.activePipelineIndex = 1 - this.activePipelineIndex;
-      this.isTransitioning = false;
-      this.transitionTimer = null;
-      this.emit({ type: 'transition_end', trackId: toTrack });
-    }, crossfadeDur * 1000);
+      standby.audio.removeEventListener('playing', onPlaying);
+      standby.audio.removeEventListener('error', onError);
+    };
+
+    const onError = () => {
+      if (resolved || gen !== this.transitionGeneration) return;
+      cleanup();
+      this.cancelTransition();
+      this.clearStandby();
+    };
+
+    const onPlaying = () => {
+      if (resolved || gen !== this.transitionGeneration) return;
+      cleanup();
+
+      const tNow = ctx.currentTime;
+      active.gainNode!.gain.cancelScheduledValues(tNow);
+      active.gainNode!.gain.setValueAtTime(active.gainNode!.gain.value, tNow);
+      active.gainNode!.gain.linearRampToValueAtTime(0.0001, tNow + crossfadeDur);
+
+      standby.gainNode!.gain.cancelScheduledValues(tNow);
+      standby.gainNode!.gain.setValueAtTime(0.0001, tNow);
+      standby.gainNode!.gain.linearRampToValueAtTime(1.0, tNow + crossfadeDur);
+
+      this.transitionTimer = setTimeout(() => {
+        if (gen !== this.transitionGeneration) return;
+        active.audio.pause();
+        active.audio.currentTime = 0;
+        active.trackId = null;
+        active.isLoaded = false;
+        active.audio.src = '';
+        if (active.gainNode && this.audioContext) {
+          active.gainNode.gain.setValueAtTime(0.0, this.audioContext.currentTime);
+        }
+        this.activePipelineIndex = standbyIndex;
+        this.isTransitioning = false;
+        this.transitionTimer = null;
+        this.emit({ type: 'transition_end', trackId: toTrack });
+        this.startRaf();
+      }, crossfadeDur * 1000);
+    };
+
+    standby.audio.addEventListener('playing', onPlaying, { once: true });
+    standby.audio.addEventListener('error', onError, { once: true });
+
+    this.transitionWatchdogTimer = setTimeout(() => {
+      if (resolved || gen !== this.transitionGeneration) return;
+      onError();
+    }, this.transitionConfirmTimeoutMs);
+
+    standby.audio.play().catch(() => {
+      onError();
+    });
   }
 
   public cancelTransition() {
-    if (!this.isTransitioning) return;
+    this.transitionGeneration++; // Invalidate any pending async transition callbacks
+    if (this.transitionWatchdogTimer !== null) {
+      clearTimeout(this.transitionWatchdogTimer);
+      this.transitionWatchdogTimer = null;
+    }
     if (this.transitionTimer !== null) {
       clearTimeout(this.transitionTimer);
       this.transitionTimer = null;
@@ -494,6 +725,7 @@ export class AudioEngine {
 
   // ── RAF Tick Loop ──
   private startRaf() {
+    if (typeof requestAnimationFrame === 'undefined') return;
     if (this.rafId !== null) return;
     const tick = () => {
       const a = this.activeAudio;
@@ -523,6 +755,7 @@ export class AudioEngine {
   }
 
   private stopRaf() {
+    if (typeof cancelAnimationFrame === 'undefined') return;
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
@@ -582,6 +815,12 @@ export class AudioEngine {
   }
   get context(): AudioContext | null {
     return this.audioContext;
+  }
+  get transitioning(): boolean {
+    return this.isTransitioning;
+  }
+  get generation(): number {
+    return this.transitionGeneration;
   }
 }
 

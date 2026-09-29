@@ -27,6 +27,22 @@ const mediaCache = new Map<string, CachedMedia>();
 const pendingResolutions = new Map<string, Promise<MediaResolution>>();
 const MEDIA_CACHE_TTL_MS = 8 * 60 * 1000; // 8 minutes
 
+/**
+ * Normalizes stream URLs to ensure CORS compatibility with HTML5 Audio and WebAudio API.
+ * Google Video / YouTube streaming URLs lack CORS headers (Access-Control-Allow-Origin),
+ * so in the browser they are routed through the Next.js /api/proxy/stream endpoint.
+ * JioSaavn streams (aac.saavncdn.com) already send Access-Control-Allow-Origin: * and stream directly.
+ */
+export function getPlayableStreamUrl(url: string): string {
+  if (!url) return '';
+  if (typeof window !== 'undefined') {
+    if (url.includes('googlevideo.com') || url.includes('youtube.com')) {
+      return `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+    }
+  }
+  return url;
+}
+
 export async function resolveMedia(
   id: string,
   signal?: AbortSignal,
@@ -53,10 +69,18 @@ export async function resolveMedia(
   const promise = fetchApi<MediaResolution>(`/songs/${cleanId}/media${qs}`, { signal })
     .then((res) => {
       if (res && res.streams && res.streams.length > 0) {
+        const normalized: MediaResolution = {
+          ...res,
+          streams: res.streams.map((s) => ({
+            ...s,
+            url: getPlayableStreamUrl(s.url),
+          })),
+        };
         mediaCache.set(cleanId, {
-          data: res,
+          data: normalized,
           expiresAt: Date.now() + MEDIA_CACHE_TTL_MS,
         });
+        return normalized;
       }
       return res;
     })

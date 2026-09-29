@@ -488,9 +488,11 @@ function _attemptQueueFallback(
   set: (partial: Partial<PlayerStore> | ((s: PlayerStore) => Partial<PlayerStore>)) => void
 ) {
   const lastTrack = get().currentTrack;
+  const reqGen = get().queueGeneration + 1;
+  // Queue reached end: immediately transition to idle to prevent stuck loading states
+  set({ status: 'idle', queueGeneration: reqGen });
+
   if (lastTrack?.id) {
-    const reqGen = get().queueGeneration + 1;
-    set({ status: 'loading', queueGeneration: reqGen });
 
     const handleNewTracks = (newSongs: Song[]) => {
       if (get().queueGeneration !== reqGen || get().currentTrack?.id !== lastTrack.id) {

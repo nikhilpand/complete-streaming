@@ -50,11 +50,22 @@ export function usePlayback() {
   const setMuted = usePlayerStore((s) => s.setMuted);
   const setError = usePlayerStore((s) => s.setError);
   const playNext = usePlayerStore((s) => s.playNext);
+  const repeatMode = usePlayerStore((s) => s.repeatMode);
 
   // Keep activeContextRef synced
   useEffect(() => {
     activeContextRef.current = playbackContext;
   }, [playbackContext]);
+
+  // Sync repeatMode with AudioEngine (defense in depth)
+  useEffect(() => {
+    if (audioManager) {
+      audioManager.setRepeatMode(repeatMode);
+      if (repeatMode === 'one') {
+        audioManager.clearStandby();
+      }
+    }
+  }, [repeatMode]);
 
   // ── 1. Wire AudioManager events → store & telemetry ──
   useEffect(() => {
@@ -166,6 +177,10 @@ export function usePlayback() {
           ) {
             nextTrackPrefetchedRef.current = track?.id || null;
             const { queue, queueIndex, isShuffled, shuffleOrder, repeatMode } = usePlayerStore.getState();
+            if (repeatMode === 'one') {
+              // Invariant: Do not prefetch next track if repeating current track
+              return;
+            }
             let nextIndex = -1;
             if (isShuffled && shuffleOrder && shuffleOrder.length === queue.length) {
               const currentPos = shuffleOrder.indexOf(queueIndex);
@@ -226,6 +241,20 @@ export function usePlayback() {
           break;
         case 'transition_start':
           setStatus('transitioning');
+          const transitingTrack = activeTrackRef.current;
+          if (transitingTrack && !milestonesFiredRef.current.completed) {
+            milestonesFiredRef.current.completed = true;
+            sendTelemetry({
+              event_type: 'completed',
+              track_id: transitingTrack.id,
+              ...getTrackMeta(transitingTrack),
+              position_ms: Math.round(playheadRef.current * 1000),
+              duration_ms: Math.round((durationRef.current || 0) * 1000) || transitingTrack.duration_ms,
+              completion_ratio: 1.0,
+              source: activeContextRef.current?.source,
+              query: activeContextRef.current?.query,
+            });
+          }
           break;
         case 'transition_end':
           const tQ = usePlayerStore.getState().queue;
@@ -435,6 +464,9 @@ export function usePlayback() {
       nextTrackPrefetchedRef.current = null;
       return;
     }
+
+    // Cancel any in-flight transitions from previous tracks
+    audioManager.cancelTransition();
 
     // Reset milestone state for new track
     activeTrackRef.current = currentTrack;
