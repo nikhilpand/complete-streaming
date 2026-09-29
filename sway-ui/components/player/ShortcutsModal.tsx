@@ -15,6 +15,7 @@ const SHORTCUTS = [
   { key: 'S', description: 'Toggle shuffle' },
   { key: 'R', description: 'Cycle repeat mode' },
   { key: 'F', description: 'Fullscreen lyrics' },
+  { key: 'E', description: 'Studio Equalizer & DSP' },
   { key: '/', description: 'Open search' },
   { key: '?', description: 'Show this help' },
 ];

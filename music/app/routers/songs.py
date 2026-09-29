@@ -24,8 +24,8 @@ def _validate_id(song_id: str) -> str:
     is_yt = sid.startswith("youtube:") or sid.startswith("yt:")
     is_sp = sid.startswith("spotify:") or sid.startswith("sp:")
     raw = sid
-    while ":" in raw:
-        raw = raw.split(":", 1)[1]
+    if is_yt or is_sp:
+        raw = sid.split(":", 1)[1]
     if not _ID_RE.match(raw):
         raise ProviderInvalidRequest(f"Invalid song ID format: {sid!r}", provider="saavn")
     if is_yt:

@@ -125,6 +125,14 @@ export function useKeyboardShortcuts() {
           if (store.currentTrack) store.toggleLyrics();
           break;
 
+        case 'e':
+        case 'E':
+          usePlayerStore.getState(); // ensure initialized
+          import('@/store/useAudioSettings').then(({ useAudioSettings }) => {
+            useAudioSettings.getState().toggleEqualizerModal();
+          });
+          break;
+
         case '?':
           e.preventDefault();
           store.toggleShortcuts();

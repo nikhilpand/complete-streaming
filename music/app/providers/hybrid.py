@@ -379,6 +379,13 @@ def _rank_and_merge(
         if y_views > existing_views:
             yt_best_by_key[key] = y_item
 
+    # Create a secondary index by title for faster fallback matches
+    yt_best_by_title: dict[str, list[SearchItem]] = {}
+    for (yt_clean, _), y_item in yt_best_by_key.items():
+        if yt_clean not in yt_best_by_title:
+            yt_best_by_title[yt_clean] = []
+        yt_best_by_title[yt_clean].append(y_item)
+
     # Step 1b: for each Saavn track, look up the best matching YT item
     for s_item in saavn_songs:
         st_clean, sa_clean, _ = _extract_item_metadata(s_item)
@@ -394,9 +401,7 @@ def _rank_and_merge(
 
         # Fall back to checking any YT key with same title and overlapping artists
         if best_yt is None:
-            for (yt_clean, _), y_item in yt_best_by_key.items():
-                if yt_clean != st_clean:
-                    continue
+            for y_item in yt_best_by_title.get(st_clean, []):
                 y_artists = _extract_all_artists(y_item)
                 ya_clean = _extract_item_metadata(y_item)[1]
                 if ya_clean:

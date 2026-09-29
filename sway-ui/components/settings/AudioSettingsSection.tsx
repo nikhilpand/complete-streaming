@@ -24,12 +24,15 @@ const CROSSFADE_OPTIONS: { label: string; value: CrossfadeDuration }[] = [
 const PRESETS: EQPresetName[] = [
   'Flat',
   'Bass Boost',
-  'Acoustic',
   'Vocal',
-  'Treble Boost',
+  'Acoustic',
   'Electronic',
   'Rock',
   'Pop',
+  'Club',
+  'Hip-Hop',
+  'Jazz',
+  'Classical',
 ];
 
 export function AudioSettingsSection() {
@@ -44,8 +47,15 @@ export function AudioSettingsSection() {
     setEqBand,
     preampGainDb,
     setPreampGainDb,
+    bassBoost,
+    setBassBoost,
+    spatialAudioEnabled,
+    setSpatialAudioEnabled,
+    spatialWidth,
+    setSpatialWidth,
     normalizationEnabled,
     setNormalizationEnabled,
+    toggleEqualizerModal,
   } = useAudioSettings();
 
   const [cacheStats, setCacheStats] = useState<{
@@ -87,8 +97,16 @@ export function AudioSettingsSection() {
             <Sliders className="w-4 h-4 text-[--art-primary]" />
             Audio Engine & Playback
           </h2>
-          <p className="text-xs text-white/50">Crossfade, 5-band equalizer, DSP, and offline cache</p>
+          <p className="text-xs text-white/50">Crossfade, 10-band ISO equalizer, 3D DSP, and offline cache</p>
         </div>
+        <button
+          type="button"
+          onClick={toggleEqualizerModal}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all cursor-pointer"
+        >
+          <Sliders className="w-3.5 h-3.5" />
+          Open Studio EQ
+        </button>
       </div>
 
       {/* 1. Crossfade & Gapless Playback */}
@@ -118,19 +136,19 @@ export function AudioSettingsSection() {
         </div>
       </div>
 
-      {/* 2. Equalizer & Preamp */}
+      {/* 2. 10-Band Equalizer & Preamp */}
       <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <label className="text-xs font-medium text-white/80 block">5-Band Equalizer</label>
-            <span className="text-[11px] text-white/50">DSP Biquad Filters with anti-clipping limiter</span>
+            <label className="text-xs font-medium text-white/80 block">10-Band Graphic Equalizer</label>
+            <span className="text-[11px] text-white/50">ISO Standard Octave Biquad Filters with hardware acceleration</span>
           </div>
           <button
             type="button"
             onClick={() => setEqEnabled(!eqEnabled)}
             className={cn(
               'px-3 py-1 rounded-full text-xs font-semibold transition-colors',
-              eqEnabled ? 'bg-[--art-primary] text-white' : 'bg-white/10 text-white/60 hover:text-white'
+              eqEnabled ? 'bg-emerald-500 text-black' : 'bg-white/10 text-white/60 hover:text-white'
             )}
           >
             {eqEnabled ? 'Enabled' : 'Bypassed'}
@@ -155,17 +173,17 @@ export function AudioSettingsSection() {
             </button>
           ))}
           {eqPreset === 'Custom' && (
-            <span className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[--art-primary]/20 text-[--art-primary] border border-[--art-primary]/30">
+            <span className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               Custom
             </span>
           )}
         </div>
 
-        {/* Frequency Sliders */}
-        <div className="grid grid-cols-5 gap-2 pt-2">
+        {/* Frequency Sliders (10-Band) */}
+        <div className="grid grid-cols-5 sm:grid-cols-10 gap-2 pt-2">
           {EQ_FREQUENCIES.map((freq, idx) => {
             const gain = eqBands[idx] || 0;
-            const label = freq >= 1000 ? `${freq / 1000}kHz` : `${freq}Hz`;
+            const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`;
             return (
               <div key={freq} className="flex flex-col items-center gap-1.5">
                 <span className="text-[10px] font-mono text-white/70">
@@ -178,13 +196,13 @@ export function AudioSettingsSection() {
                   step={1}
                   disabled={!eqEnabled}
                   value={gain}
-                  onChange={(e) => setEqBand(idx as 0 | 1 | 2 | 3 | 4, Number(e.target.value))}
+                  onChange={(e) => setEqBand(idx, Number(e.target.value))}
                   className={cn(
-                    'w-full h-20 -rotate-180 appearance-none bg-white/10 rounded-full cursor-pointer accent-[--art-primary]',
+                    'w-full h-20 -rotate-180 appearance-none bg-white/10 rounded-full cursor-pointer accent-emerald-400',
                     !eqEnabled && 'opacity-40 cursor-not-allowed'
                   )}
                   style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
-                  aria-label={`${label} band gain`}
+                  aria-label={`${label}Hz band gain`}
                 />
                 <span className="text-[10px] font-mono text-white/50">{label}</span>
               </div>
@@ -200,14 +218,68 @@ export function AudioSettingsSection() {
               type="range"
               min={-6}
               max={6}
-              step={1}
+              step={0.5}
               value={preampGainDb}
+              disabled={!eqEnabled}
               onChange={(e) => setPreampGainDb(Number(e.target.value))}
-              className="w-28 accent-[--art-primary] cursor-pointer"
+              className="w-28 accent-emerald-400 cursor-pointer disabled:opacity-40"
               aria-label="Preamp Gain Slider"
             />
             <span className="font-mono text-white/80 w-10 text-right">
               {preampGainDb > 0 ? `+${preampGainDb}` : preampGainDb}dB
+            </span>
+          </div>
+        </div>
+
+        {/* Bass Boost Resonator */}
+        <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-xs">
+          <span className="text-white/60">Bass Boost Resonator</span>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={bassBoost}
+              disabled={!eqEnabled}
+              onChange={(e) => setBassBoost(Number(e.target.value))}
+              className="w-28 accent-amber-400 cursor-pointer disabled:opacity-40"
+              aria-label="Bass Boost Slider"
+            />
+            <span className="font-mono text-amber-400 w-10 text-right">
+              {bassBoost}%
+            </span>
+          </div>
+        </div>
+
+        {/* 3D Spatial Audio & Stereo Widener */}
+        <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-white/60">3D Spatial Widener</span>
+            <label className="relative inline-flex items-center cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={spatialAudioEnabled}
+                onChange={(e) => setSpatialAudioEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-7 h-3.5 bg-neutral-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-purple-500" />
+            </label>
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={0}
+              max={200}
+              step={5}
+              value={spatialWidth}
+              disabled={!spatialAudioEnabled}
+              onChange={(e) => setSpatialWidth(Number(e.target.value))}
+              className="w-28 accent-purple-400 cursor-pointer disabled:opacity-40"
+              aria-label="Spatial Width Slider"
+            />
+            <span className="font-mono text-purple-400 w-10 text-right">
+              {spatialWidth}%
             </span>
           </div>
         </div>

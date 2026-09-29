@@ -74,8 +74,16 @@ export class AudioEngine {
   private masterGainNode: GainNode | null = null;
   private preampGainNode: GainNode | null = null;
   private eqFilters: BiquadFilterNode[] = [];
+  private bassBoostFilter: BiquadFilterNode | null = null;
+  private spatialSplitter: ChannelSplitterNode | null = null;
+  private spatialMerger: ChannelMergerNode | null = null;
+  private spatialGainLL: GainNode | null = null;
+  private spatialGainRL: GainNode | null = null;
+  private spatialGainLR: GainNode | null = null;
+  private spatialGainRR: GainNode | null = null;
   private compressorNode: DynamicsCompressorNode | null = null;
   private analyserNode: AnalyserNode | null = null;
+  private settingsUnsub: (() => void) | null = null;
 
   private listeners = new Set<Listener>();
   private rafId: number | null = null;
@@ -118,6 +126,11 @@ export class AudioEngine {
         { id: 'A', audio: audioA, sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
         { id: 'B', audio: audioB, sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
       ];
+
+      if (!this.settingsUnsub) {
+        this.settingsUnsub = useAudioSettings.subscribe(() => this.syncAudioSettings());
+      }
+
       return this.pipelines[this.activePipelineIndex].audio;
     }
 
@@ -128,7 +141,7 @@ export class AudioEngine {
     }
 
     // 2. Build DSP graph:
-    // [pipelineA.gain, pipelineB.gain] -> preamp -> 5 EQ filters -> compressor -> masterGain -> analyser -> destination
+    // [pipelineA.gain, pipelineB.gain] -> preamp -> 10 EQ filters -> bassBoost -> spatializer -> compressor -> masterGain -> analyser -> destination
     if (this.audioContext) {
       const ctx = this.audioContext;
 
@@ -150,7 +163,7 @@ export class AudioEngine {
       this.compressorNode.attack.setValueAtTime(0.005, ctx.currentTime);
       this.compressorNode.release.setValueAtTime(0.05, ctx.currentTime);
 
-      // 5-band EQ filters
+      // 10-band ISO standard EQ filters
       this.eqFilters = EQ_FREQUENCIES.map((freq, idx) => {
         const filter = ctx.createBiquadFilter();
         filter.frequency.setValueAtTime(freq, ctx.currentTime);
@@ -166,16 +179,52 @@ export class AudioEngine {
         return filter;
       });
 
+      // Bass Boost low-shelf filter (80 Hz)
+      this.bassBoostFilter = ctx.createBiquadFilter();
+      this.bassBoostFilter.type = 'lowshelf';
+      this.bassBoostFilter.frequency.setValueAtTime(80, ctx.currentTime);
+      this.bassBoostFilter.gain.setValueAtTime(0, ctx.currentTime);
+
+      // 3D Spatial Audio & Stereo Widener (Mid-Side matrix processor)
+      this.spatialSplitter = ctx.createChannelSplitter(2);
+      this.spatialMerger = ctx.createChannelMerger(2);
+      this.spatialGainLL = ctx.createGain();
+      this.spatialGainRL = ctx.createGain();
+      this.spatialGainLR = ctx.createGain();
+      this.spatialGainRR = ctx.createGain();
+
+      this.spatialGainLL.gain.setValueAtTime(1.0, ctx.currentTime);
+      this.spatialGainRL.gain.setValueAtTime(0.0, ctx.currentTime);
+      this.spatialGainLR.gain.setValueAtTime(0.0, ctx.currentTime);
+      this.spatialGainRR.gain.setValueAtTime(1.0, ctx.currentTime);
+
+      this.spatialSplitter.connect(this.spatialGainLL, 0);
+      this.spatialSplitter.connect(this.spatialGainLR, 0);
+      this.spatialSplitter.connect(this.spatialGainRL, 1);
+      this.spatialSplitter.connect(this.spatialGainRR, 1);
+
+      this.spatialGainLL.connect(this.spatialMerger, 0, 0);
+      this.spatialGainRL.connect(this.spatialMerger, 0, 0);
+      this.spatialGainLR.connect(this.spatialMerger, 0, 1);
+      this.spatialGainRR.connect(this.spatialMerger, 0, 1);
+
       // Connect DSP chain
       let prevNode: AudioNode = this.preampGainNode;
       for (const filter of this.eqFilters) {
         prevNode.connect(filter);
         prevNode = filter;
       }
-      prevNode.connect(this.compressorNode);
+      prevNode.connect(this.bassBoostFilter);
+      this.bassBoostFilter.connect(this.spatialSplitter);
+      this.spatialMerger.connect(this.compressorNode);
       this.compressorNode.connect(this.masterGainNode);
       this.masterGainNode.connect(this.analyserNode);
       this.analyserNode.connect(ctx.destination);
+
+      // Reactively sync whenever useAudioSettings changes (sliders, presets, toggles)
+      if (!this.settingsUnsub) {
+        this.settingsUnsub = useAudioSettings.subscribe(() => this.syncAudioSettings());
+      }
 
       // Apply initial settings
       this.syncAudioSettings();
@@ -334,21 +383,76 @@ export class AudioEngine {
   public syncAudioSettings() {
     if (!this.audioContext) return;
     const ctx = this.audioContext;
+    const now = ctx.currentTime;
     const settings = useAudioSettings.getState();
 
-    // 1. Preamp gain
+    // 1. Preamp gain (-6dB to +6dB)
     if (this.preampGainNode) {
       const preampLinear = Math.pow(10, (settings.preampGainDb || 0) / 20);
-      this.preampGainNode.gain.setTargetAtTime(preampLinear, ctx.currentTime, 0.05);
+      this.preampGainNode.gain.setTargetAtTime(preampLinear, now, 0.03);
     }
 
-    // 2. 5-Band EQ filters
-    if (this.eqFilters.length === 5) {
+    // 2. 10-Band EQ filters
+    if (this.eqFilters.length === EQ_FREQUENCIES.length) {
       const enabled = settings.eqEnabled;
       this.eqFilters.forEach((filter, idx) => {
-        const targetGainDb = enabled ? settings.eqBands[idx] || 0 : 0;
-        filter.gain.setTargetAtTime(targetGainDb, ctx.currentTime, 0.05);
+        const targetGainDb = enabled ? (settings.eqBands[idx] ?? 0) : 0;
+        filter.gain.setTargetAtTime(targetGainDb, now, 0.03);
       });
+    }
+
+    // 3. Bass Boost Resonator (0 - 100% -> 0 to 10 dB low-shelf at 80Hz)
+    if (this.bassBoostFilter) {
+      const boostGainDb = settings.eqEnabled ? ((settings.bassBoost || 0) / 100) * 10 : 0;
+      this.bassBoostFilter.gain.setTargetAtTime(boostGainDb, now, 0.03);
+    }
+
+    // 4. 3D Spatial Audio & Stereo Widener (Mid-Side matrix processor)
+    if (
+      this.spatialGainLL &&
+      this.spatialGainRL &&
+      this.spatialGainLR &&
+      this.spatialGainRR
+    ) {
+      // widthFactor: 1.0 = normal, 0.0 = mono, 2.0 = ultra-wide 3D
+      const widthFactor = settings.spatialAudioEnabled
+        ? Math.max(0, Math.min(2, (settings.spatialWidth ?? 100) / 100))
+        : 1.0;
+
+      const gainDirect = 0.5 * (1 + widthFactor);
+      const gainCross = 0.5 * (1 - widthFactor);
+
+      this.spatialGainLL.gain.setTargetAtTime(gainDirect, now, 0.03);
+      this.spatialGainRL.gain.setTargetAtTime(gainCross, now, 0.03);
+      this.spatialGainLR.gain.setTargetAtTime(gainCross, now, 0.03);
+      this.spatialGainRR.gain.setTargetAtTime(gainDirect, now, 0.03);
+    }
+
+    // 5. Anti-Clipping Limiter & Loudness Normalization
+    if (this.compressorNode) {
+      if (settings.normalizationEnabled) {
+        // Active loudness normalization compressor
+        this.compressorNode.threshold.setTargetAtTime(-14.0, now, 0.03);
+        this.compressorNode.ratio.setTargetAtTime(4.0, now, 0.03);
+        this.compressorNode.knee.setTargetAtTime(10.0, now, 0.03);
+        this.compressorNode.attack.setTargetAtTime(0.003, now, 0.03);
+        this.compressorNode.release.setTargetAtTime(0.25, now, 0.03);
+      } else {
+        // Transparent brickwall peak limiter to prevent digital clipping
+        this.compressorNode.threshold.setTargetAtTime(-0.5, now, 0.03);
+        this.compressorNode.ratio.setTargetAtTime(16.0, now, 0.03);
+        this.compressorNode.knee.setTargetAtTime(2.0, now, 0.03);
+        this.compressorNode.attack.setTargetAtTime(0.001, now, 0.03);
+        this.compressorNode.release.setTargetAtTime(0.05, now, 0.03);
+      }
+    }
+  }
+
+  public async resumeContext(): Promise<void> {
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      try {
+        await this.audioContext.resume();
+      } catch {}
     }
   }
 

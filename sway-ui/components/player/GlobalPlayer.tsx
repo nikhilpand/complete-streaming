@@ -18,16 +18,19 @@ import {
   Check,
   Download,
   Loader2,
+  Sliders,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '@/store/playerStore';
 import { useLikedSongs } from '@/store/useLikedSongs';
+import { useAudioSettings } from '@/store/useAudioSettings';
 import { Artwork } from '@/components/artwork/Artwork';
 import { IconButton } from '@/components/ui/IconButton';
 import { ProgressBar } from './ProgressBar';
 import { VolumeControl } from './VolumeControl';
 import { SleepTimerControl } from './SleepTimerControl';
 import { ShortcutsModal } from './ShortcutsModal';
+import { EqualizerModal } from './EqualizerModal';
 import { cn, artistNames } from '@/lib/utils';
 import { downloadSong, type DownloadStatus } from '@/lib/download';
 
@@ -45,6 +48,8 @@ export function Player() {
   const togglePlayPause = usePlayerStore((s) => s.togglePlayPause);
   const isLiked = useLikedSongs((s) => s.isLiked(currentTrack?.id));
   const toggleLike = useLikedSongs((s) => s.toggleLike);
+  const toggleEqModal = useAudioSettings((s) => s.toggleEqualizerModal);
+  const eqEnabled = useAudioSettings((s) => s.eqEnabled);
 
   const [copied, setCopied] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>('idle');
@@ -235,6 +240,15 @@ export function Player() {
                 {/* Right controls */}
                 <div className="hidden md:flex items-center gap-1 flex-1 justify-end">
                   <SleepTimerControl />
+                  <IconButton
+                    sz="sm"
+                    onClick={toggleEqModal}
+                    aria-label="Equalizer & DSP"
+                    title={eqEnabled ? 'Studio Equalizer (Active)' : 'Studio Equalizer'}
+                    className={cn(eqEnabled ? 'text-emerald-400 hover:text-emerald-300' : 'text-white/60 hover:text-white')}
+                  >
+                    <Sliders className="w-4 h-4" />
+                  </IconButton>
                   <IconButton sz="sm" onClick={toggleLyrics} aria-label="Lyrics" title="Lyrics (Full Screen)">
                     <Mic2 className="w-4 h-4 text-[--art-primary]" />
                   </IconButton>
@@ -255,6 +269,7 @@ export function Player() {
         )}
       </AnimatePresence>
       <ShortcutsModal />
+      <EqualizerModal />
     </>
   );
 }

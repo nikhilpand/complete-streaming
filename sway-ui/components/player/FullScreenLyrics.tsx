@@ -27,8 +27,9 @@ import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
 import { LyricShareCardModal } from './lyrics/LyricShareCardModal';
 import type { RecommendationTrack } from '@/lib/api/types';
 import { Artwork } from '@/components/artwork/Artwork';
-import { artistNames } from '@/lib/utils';
+import { artistNames, cn } from '@/lib/utils';
 import { useLikedSongs } from '@/store/useLikedSongs';
+import { useAudioSettings } from '@/store/useAudioSettings';
 import { downloadSong, type DownloadStatus } from '@/lib/download';
 import type { LyricsTimingProvenance } from '@/lib/lyrics-engine/types';
 
@@ -123,6 +124,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
   const cycleRepeat = usePlayerStore((s) => s.cycleRepeat);
   const toggleLyrics = usePlayerStore((s) => s.toggleLyrics);
+  const toggleEqualizerModal = useAudioSettings((s) => s.toggleEqualizerModal);
+  const eqEnabled = useAudioSettings((s) => s.eqEnabled);
 
   const currentTrack = useMemo(() => {
     if (!rawTrack) return null;
@@ -1166,16 +1169,21 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           </span>
         </button>
 
-        {/* Direct Settings Link */}
-        <Link
-          href="/settings"
-          onClick={handleClose}
-          className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-          title="Settings & Audio Calibration"
-          aria-label="Settings"
+        {/* Direct Studio Equalizer & DSP Button */}
+        <button
+          type="button"
+          onClick={toggleEqualizerModal}
+          className={cn(
+            'w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer',
+            eqEnabled
+              ? 'text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20'
+              : 'text-white/50 hover:text-white hover:bg-white/10'
+          )}
+          title={eqEnabled ? 'Studio Equalizer & DSP (Active)' : 'Studio Equalizer & DSP (E)'}
+          aria-label="Studio Equalizer"
         >
           <Sliders size={15} />
-        </Link>
+        </button>
 
         <button
           type="button"
@@ -1267,15 +1275,20 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           >
             Aa
           </button>
-          <Link
-            href="/settings"
-            onClick={handleClose}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-black/40 backdrop-blur-xl border border-white/15 text-white/70 hover:text-white shadow-md active:scale-95 transition-all cursor-pointer"
-            title="Settings"
-            aria-label="Settings"
+          <button
+            type="button"
+            onClick={toggleEqualizerModal}
+            className={cn(
+              'w-9 h-9 rounded-full flex items-center justify-center bg-black/40 backdrop-blur-xl border shadow-md active:scale-95 transition-all cursor-pointer',
+              eqEnabled
+                ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+                : 'border-white/15 text-white/70 hover:text-white'
+            )}
+            title={eqEnabled ? 'Studio Equalizer (Active)' : 'Studio Equalizer'}
+            aria-label="Studio Equalizer"
           >
             <Sliders size={15} />
-          </Link>
+          </button>
           <button
             type="button"
             onClick={() => setIsDrawerOpen((prev) => !prev)}

@@ -237,4 +237,68 @@ describe('AudioEngine Architecture, Correctness & Seamless Transitions', () => {
     assert.equal(endedFired, true, 'Must fire ended for store repeat handler');
     assert.equal(engine.activePipeline.id, 'A', 'Must stay on pipeline A');
   });
+
+  test('useAudioSettings supports 10-band ISO frequencies and 21 studio presets', () => {
+    const state = useAudioSettings.getState();
+    assert.equal(state.eqBands.length, 10, 'Must have 10 EQ bands');
+
+    const presetsToTest = ['Rock', 'Pop', 'Electronic', 'Classical', 'Jazz', 'Hip-Hop', 'Dance', 'Club', 'Vocal', 'Acoustic', 'Deep', 'Loudness', 'R&B'] as const;
+    for (const preset of presetsToTest) {
+      state.setEqPreset(preset);
+      assert.equal(useAudioSettings.getState().eqPreset, preset);
+      assert.equal(useAudioSettings.getState().eqBands.length, 10);
+      assert.deepEqual(useAudioSettings.getState().eqBands, EQ_PRESETS[preset]);
+    }
+  });
+
+  test('useAudioSettings handles Bass Boost resonator, Spatial Audio & resetEq', () => {
+    const state = useAudioSettings.getState();
+
+    // Bass Boost (0 - 100%)
+    state.setBassBoost(85);
+    assert.equal(useAudioSettings.getState().bassBoost, 85);
+    state.setBassBoost(150); // Clamped to 100
+    assert.equal(useAudioSettings.getState().bassBoost, 100);
+    state.setBassBoost(-20); // Clamped to 0
+    assert.equal(useAudioSettings.getState().bassBoost, 0);
+
+    // 3D Spatial Audio & Stereo Widener
+    state.setSpatialAudioEnabled(true);
+    assert.equal(useAudioSettings.getState().spatialAudioEnabled, true);
+    state.setSpatialWidth(150);
+    assert.equal(useAudioSettings.getState().spatialWidth, 150);
+    state.setSpatialWidth(250); // Clamped to 200
+    assert.equal(useAudioSettings.getState().spatialWidth, 200);
+    state.setSpatialWidth(-10); // Clamped to 0
+    assert.equal(useAudioSettings.getState().spatialWidth, 0);
+
+    // Reset EQ
+    state.setEqPreset('Rock');
+    state.setPreampGainDb(4);
+    state.setBassBoost(70);
+    state.resetEq();
+
+    const resetState = useAudioSettings.getState();
+    assert.equal(resetState.eqPreset, 'Flat');
+    assert.deepEqual(resetState.eqBands, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.equal(resetState.preampGainDb, 0);
+    assert.equal(resetState.bassBoost, 0);
+  });
+
+  test('AudioEngine reactively syncs with store changes without error', () => {
+    const engine = new AudioEngine();
+    engine.init();
+
+    // Trigger changes in store - AudioEngine subscription must execute without throwing
+    useAudioSettings.getState().setEqEnabled(true);
+    useAudioSettings.getState().setEqPreset('Electronic');
+    useAudioSettings.getState().setBassBoost(60);
+    useAudioSettings.getState().setSpatialAudioEnabled(true);
+    useAudioSettings.getState().setSpatialWidth(140);
+    useAudioSettings.getState().setNormalizationEnabled(false);
+
+    assert.equal(useAudioSettings.getState().eqPreset, 'Electronic');
+    assert.equal(useAudioSettings.getState().bassBoost, 60);
+    assert.equal(useAudioSettings.getState().spatialWidth, 140);
+  });
 });
