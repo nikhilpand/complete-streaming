@@ -55,7 +55,7 @@ export function SleepTimerControl() {
     if (
       sleepTimerActive &&
       timerRef.current?.isEndOfTrackMode() &&
-      (status === 'idle' || status === 'IDLE')
+      status === 'idle'
     ) {
       timerRef.current.expireNow();
     }

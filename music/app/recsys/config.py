@@ -12,16 +12,16 @@ def _f(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     # storage / privacy
-    db_path: str = os.getenv("SWAY_RECS_DB", "sway_recs.db")
-    user_salt: str = os.getenv("SWAY_USER_SALT", "change-me-in-prod")
+    db_path: str = field(default_factory=lambda: os.getenv("SWAY_RECS_DB", "sway_recs.db"))
+    user_salt: str = field(default_factory=lambda: os.getenv("SWAY_USER_SALT", "change-me-in-prod"))
 
     # YTM locale (Indian results)
     ytm_language: str = "en"
     ytm_location: str = "IN"
 
     # latency budgets
-    source_timeout_s: float = _f("SWAY_SOURCE_TIMEOUT", 2.5)
-    resolve_timeout_s: float = _f("SWAY_RESOLVE_TIMEOUT", 1.6)
+    source_timeout_s: float = field(default_factory=lambda: _f("SWAY_SOURCE_TIMEOUT", 2.5))
+    resolve_timeout_s: float = field(default_factory=lambda: _f("SWAY_RESOLVE_TIMEOUT", 1.6))
     resolve_concurrency: int = 8
     resolve_pool: int = 40          # how many fused candidates we try to map to Saavn
 
@@ -65,3 +65,11 @@ class Settings:
     graph_min_weight: float = 2.0
     graph_per_user_cap: float = 3.0
     graph_max_neighbors: int = 50
+
+    def __post_init__(self) -> None:
+        env = (os.getenv("ENVIRONMENT") or os.getenv("SWAY_ENV") or "").strip().lower()
+        if env == "production":
+            if not self.user_salt or self.user_salt == "change-me-in-prod":
+                raise RuntimeError(
+                    "SWAY_USER_SALT must be configured with a secure non-default secret in production."
+                )

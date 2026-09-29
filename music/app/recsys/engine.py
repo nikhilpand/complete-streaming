@@ -122,9 +122,16 @@ class RecommendationEngine:
 
     # ------------------------------------------------------------------ rank pipeline
     async def _resolve_pool(self, pool: list[Candidate]) -> None:
-        todo = [asyncio.ensure_future(self.resolver.to_saavn(c)) for c in pool if not c.saavn_id]
-        if not todo:
+        unresolved = [c for c in pool if not c.saavn_id]
+        if not unresolved:
             return
+        sem = asyncio.Semaphore(self.s.resolve_concurrency)
+
+        async def _bounded_resolve(c: Candidate):
+            async with sem:
+                return await self.resolver.to_saavn(c)
+
+        todo = [asyncio.ensure_future(_bounded_resolve(c)) for c in unresolved]
         done, pending = await asyncio.wait(todo, timeout=self.s.resolve_timeout_s)
         for t in pending:
             t.cancel()

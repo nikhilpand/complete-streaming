@@ -233,14 +233,22 @@ async def events(
     body: EventIn,
     x_sway_user_id: Optional[str] = Header(None),
 ):
-    """Client reports: complete | skip (with position_ms) | like | unlike | dislike | play_start."""
-    global _seen_event_ids
+    user_val = body.user_id or x_sway_user_id
+    user_hash = _uid(request, user_val)
+
     if body.client_event_id:
-        if body.client_event_id in _seen_event_ids:
-            return {"success": True, "ok": True, "accepted": False, "duplicate": True}
-        _seen_event_ids.add(body.client_event_id)
-        if len(_seen_event_ids) > 10000:
-            _seen_event_ids.clear()
+        store = getattr(_eng(request), "store", None)
+        if store and hasattr(store, "check_and_record_event"):
+            is_new = store.check_and_record_event(body.client_event_id, user_hash)
+            if not is_new:
+                return {"success": True, "ok": True, "accepted": False, "duplicate": True}
+        else:
+            global _seen_event_ids
+            if body.client_event_id in _seen_event_ids:
+                return {"success": True, "ok": True, "accepted": False, "duplicate": True}
+            _seen_event_ids.add(body.client_event_id)
+            if len(_seen_event_ids) > 10000:
+                _seen_event_ids.clear()
 
     if not body.track_id:
         return {"success": True, "ok": True, "accepted": True, "recorded": True}
@@ -257,11 +265,10 @@ async def events(
         "skip_10_30s": "skip",
     }
     canonical_kind = kind_map.get(raw_kind, raw_kind)
-    user_val = body.user_id or x_sway_user_id
 
     try:
         _eng(request).record_event(
-            user=_uid(request, user_val),
+            user=user_hash,
             session_id=body.session_id,
             track_id=_check_id(body.track_id),
             kind=canonical_kind,

@@ -51,9 +51,9 @@ export class AudioEngine {
    * Initializes persistent AudioContext and dual pipelines.
    * Safe to call multiple times (idempotent).
    */
-  public init(): AudioPipeline {
+  public init(): HTMLAudioElement {
     if (this.pipelines) {
-      return this.pipelines[this.activePipelineIndex];
+      return this.pipelines[this.activePipelineIndex].audio;
     }
 
     if (typeof window === 'undefined') {
@@ -79,7 +79,7 @@ export class AudioEngine {
         { id: 'A', audio: createMockAudio(), sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
         { id: 'B', audio: createMockAudio(), sourceNode: null, gainNode: null, trackId: null, isLoaded: false },
       ];
-      return this.pipelines[this.activePipelineIndex];
+      return this.pipelines[this.activePipelineIndex].audio;
     }
 
     // 1. One persistent AudioContext
@@ -180,7 +180,7 @@ export class AudioEngine {
     this.pipelines = [pipeA, pipeB];
     this.activePipelineIndex = 0;
 
-    return this.pipelines[0];
+    return this.pipelines[0].audio;
   }
 
   private wirePipelineEvents(audio: HTMLAudioElement, pipeId: 'A' | 'B') {
@@ -207,8 +207,25 @@ export class AudioEngine {
 
     audio.addEventListener('ended', () => {
       if (this.isCurrentPipeline(pipeId)) {
+        const standby = this.standbyPipeline;
+        if (standby.isLoaded && standby.audio.src) {
+          // Gapless atomic swap to prebuffered standby track
+          const fromTrack = this.activePipeline.trackId || undefined;
+          const toTrack = standby.trackId || undefined;
+          this.emit({ type: 'transition_start', fromTrackId: fromTrack, toTrackId: toTrack });
+          standby.audio.play().catch(() => {});
+          this.activePipelineIndex = 1 - this.activePipelineIndex;
+          this.emit({ type: 'transition_end', trackId: toTrack });
+          return;
+        }
         this.emit({ type: 'ended' });
         this.stopRaf();
+      }
+    });
+
+    audio.addEventListener('volumechange', () => {
+      if (this.isCurrentPipeline(pipeId)) {
+        this.emit({ type: 'volumechange', volume: audio.volume, muted: audio.muted });
       }
     });
 
@@ -361,11 +378,10 @@ export class AudioEngine {
     if (this.masterGainNode && this.audioContext) {
       const targetGain = this.userMuted ? 0 : safe;
       this.masterGainNode.gain.setTargetAtTime(targetGain, this.audioContext.currentTime, 0.02);
-    } else {
-      if (this.pipelines) {
-        this.pipelines[0].audio.volume = safe;
-        this.pipelines[1].audio.volume = safe;
-      }
+    }
+    if (this.pipelines) {
+      this.pipelines[0].audio.volume = safe;
+      this.pipelines[1].audio.volume = safe;
     }
     this.emit({ type: 'volumechange', volume: safe, muted: this.userMuted });
   }
@@ -376,11 +392,10 @@ export class AudioEngine {
     if (this.masterGainNode && this.audioContext) {
       const targetGain = m ? 0 : this.userVolume;
       this.masterGainNode.gain.setTargetAtTime(targetGain, this.audioContext.currentTime, 0.02);
-    } else {
-      if (this.pipelines) {
-        this.pipelines[0].audio.muted = m;
-        this.pipelines[1].audio.muted = m;
-      }
+    }
+    if (this.pipelines) {
+      this.pipelines[0].audio.muted = m;
+      this.pipelines[1].audio.muted = m;
     }
     this.emit({ type: 'volumechange', volume: this.userVolume, muted: m });
   }
@@ -539,9 +554,11 @@ export class AudioEngine {
 
   // ── State Getters ──
   get currentTime() {
+    if (!this.pipelines) return 0;
     return this.activeAudio?.currentTime ?? 0;
   }
   get duration() {
+    if (!this.pipelines) return 0;
     return this.activeAudio?.duration ?? 0;
   }
   get volume() {
@@ -551,15 +568,17 @@ export class AudioEngine {
     return this.userMuted;
   }
   get paused() {
+    if (!this.pipelines) return true;
     return this.activeAudio?.paused ?? true;
   }
   get bufferedTime(): number {
+    if (!this.pipelines) return 0;
     const a = this.activeAudio;
     if (!a || a.buffered.length === 0) return 0;
     return a.buffered.end(a.buffered.length - 1);
   }
   get audioElement(): HTMLAudioElement | null {
-    return this.activeAudio;
+    return this.pipelines ? this.activeAudio : null;
   }
   get context(): AudioContext | null {
     return this.audioContext;

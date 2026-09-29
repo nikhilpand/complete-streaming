@@ -180,7 +180,22 @@ export function usePlayback() {
 
             if (nextIndex >= 0 && queue[nextIndex]) {
               const nextTrack = queue[nextIndex];
-              prefetchMedia(nextTrack.id);
+              const nextMeta = {
+                title: nextTrack.title,
+                artist: artistNames(nextTrack.artists, nextTrack.subtitle),
+              };
+              resolveMedia(nextTrack.id, undefined, nextMeta)
+                .then((media) => {
+                  if (media?.streams?.length) {
+                    const best = [...media.streams].sort(
+                      (a, b) => (b.bitrate_kbps ?? 0) - (a.bitrate_kbps ?? 0)
+                    )[0];
+                    if (best?.url) {
+                      audioManager.preload(best.url, nextTrack.id);
+                    }
+                  }
+                })
+                .catch(() => {});
               prefetchLyrics(nextTrack);
             }
           }
@@ -207,6 +222,17 @@ export function usePlayback() {
                 });
               } catch {}
             }
+          }
+          break;
+        case 'transition_start':
+          setStatus('transitioning');
+          break;
+        case 'transition_end':
+          const tQ = usePlayerStore.getState().queue;
+          const tIdx = usePlayerStore.getState().queueIndex;
+          const targetNext = tQ[tIdx + 1];
+          if (targetNext && (!ev.trackId || ev.trackId === targetNext.id)) {
+            usePlayerStore.getState().playNext();
           }
           break;
         case 'ended':
@@ -393,6 +419,23 @@ export function usePlayback() {
     const generation = ++playbackGenRef.current;
     retryCountRef.current = 0;
 
+    // If active pipeline is already playing this track (via gapless / crossfade transition swap),
+    // smoothly update metadata and milestones without reloading or interrupting audio!
+    if (audioManager.activePipeline?.trackId === currentTrack.id && !audioManager.paused) {
+      activeTrackRef.current = currentTrack;
+      milestonesFiredRef.current = {};
+      playheadRef.current = audioManager.currentTime;
+      prevIdRef.current = currentTrack.id;
+      setStatus('playing');
+      setError(null);
+      if (currentTrack.artwork_url) {
+        scheduleExtract(currentTrack.artwork_url, applyPalette);
+      }
+      prefetchLyrics(currentTrack);
+      nextTrackPrefetchedRef.current = null;
+      return;
+    }
+
     // Reset milestone state for new track
     activeTrackRef.current = currentTrack;
     milestonesFiredRef.current = {};
@@ -422,7 +465,7 @@ export function usePlayback() {
         const cached = await getCachedAudio(currentTrack.id);
         if (cached?.objectUrl) {
           if (ac.signal.aborted || playbackGenRef.current !== generation) return;
-          await audioManager.load(cached.objectUrl);
+          await audioManager.load(cached.objectUrl, currentTrack.id);
           if (ac.signal.aborted || playbackGenRef.current !== generation) return;
           await audioManager.play();
           return;
@@ -450,7 +493,7 @@ export function usePlayback() {
             return;
           }
           try {
-            await audioManager.load(best.url);
+            await audioManager.load(best.url, currentTrack.id);
             if (ac.signal.aborted || playbackGenRef.current !== generation) return;
             await audioManager.play();
 

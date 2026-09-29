@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS track_stats(
   completes INTEGER DEFAULT 0, likes INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS graph_edges(a TEXT NOT NULL, b TEXT NOT NULL, weight REAL NOT NULL, PRIMARY KEY(a,b));
 CREATE INDEX IF NOT EXISTS idx_graph_a ON graph_edges(a, weight DESC);
+CREATE TABLE IF NOT EXISTS idempotent_events(
+  event_id TEXT PRIMARY KEY, user_hash TEXT, created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_idempotent_events_created ON idempotent_events(created_at);
 """
 
 EVENT_KINDS = {"impression", "play_start", "complete", "skip", "like", "unlike", "dislike"}
@@ -171,3 +174,18 @@ class Store:
     def neighbors(self, saavn_id: str, limit: int = 30) -> list[tuple[str, float]]:
         return [(r[0], r[1]) for r in self._q(
             "SELECT b, weight FROM graph_edges WHERE a=? ORDER BY weight DESC LIMIT ?", (saavn_id, limit))]
+
+    # ---- idempotency
+    def check_and_record_event(self, event_id: str, user_hash: Optional[str] = None, ttl_s: int = 86400) -> bool:
+        """Atomically record event_id. Returns True if newly recorded, False if already seen within ttl_s."""
+        now = time.time()
+        with self._lock:
+            self._c.execute("DELETE FROM idempotent_events WHERE created_at < ?", (now - ttl_s,))
+            try:
+                self._c.execute(
+                    "INSERT INTO idempotent_events(event_id, user_hash, created_at) VALUES(?,?,?)",
+                    (event_id, user_hash, now)
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False

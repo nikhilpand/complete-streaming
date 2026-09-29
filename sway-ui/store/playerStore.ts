@@ -3,22 +3,16 @@ import { subscribeWithSelector, persist, createJSONStorage } from 'zustand/middl
 import type { Song } from '@/lib/api/types';
 import { getSavedVolume, getSavedMuted } from '@/lib/utils';
 
-// Expanded state machine status
+// Unified playback state machine status
 export type PlayerStatus =
-  | 'IDLE'
-  | 'RESOLVING'
-  | 'LOADING'
-  | 'READY'
-  | 'PLAYING'
-  | 'PAUSED'
-  | 'BUFFERING'
-  | 'TRANSITIONING'
-  | 'ERROR'
-  // Legacy aliases for backward compat
   | 'idle'
+  | 'resolving'
   | 'loading'
+  | 'ready'
   | 'playing'
   | 'paused'
+  | 'buffering'
+  | 'transitioning'
   | 'error';
 
 export interface PlaybackContext {
@@ -367,7 +361,7 @@ export const usePlayerStore = create<PlayerStore>()(
             import('@/lib/audio/AudioManager')
               .then(({ audioManager }) => {
                 if (!audioManager) return;
-                if (status === 'playing' || status === 'PLAYING') {
+                if (status === 'playing') {
                   audioManager.pause();
                 } else {
                   audioManager.play().catch(() => {});

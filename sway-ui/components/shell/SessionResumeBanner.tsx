@@ -25,7 +25,7 @@ export function SessionResumeBanner() {
     // Small delay to allow hydration to settle
     const t = setTimeout(() => {
       const state = usePlayerStore.getState();
-      if (state.currentTrack && (state.status === 'idle' || state.status === 'IDLE')) {
+      if (state.currentTrack && state.status === 'idle') {
         setVisible(true);
       }
     }, 600);
@@ -41,7 +41,7 @@ export function SessionResumeBanner() {
 
   // Hide when playback starts
   useEffect(() => {
-    if (status === 'playing' || status === 'PLAYING') {
+    if (status === 'playing') {
       setVisible(false);
     }
   }, [status]);
