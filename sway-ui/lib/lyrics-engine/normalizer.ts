@@ -22,8 +22,8 @@ export function normalizeMetadata(identity: TrackIdentity): NormalizedMetadata {
   const primaryArtist = allArtists[0] || '';
 
   // 1. Unicode NFKC
-  let titleNFKC = rawTitle.normalize('NFKC');
-  let albumNFKC = rawAlbum.normalize('NFKC');
+  const titleNFKC = rawTitle.normalize('NFKC');
+  const albumNFKC = rawAlbum.normalize('NFKC');
 
   // 2. Extract context tokens from movie tags e.g. (From "Brahmāstra")
   const contextTokens: string[] = [];
@@ -59,7 +59,7 @@ export function normalizeMetadata(identity: TrackIdentity): NormalizedMetadata {
   }
 
   // Clean album
-  let cleanAlbum = albumNFKC
+  const cleanAlbum = albumNFKC
     .replace(/\s*\(Original Motion Picture Soundtrack\)/gi, '')
     .replace(/\s*\(Original Soundtrack\)/gi, '')
     .replace(/\s*\(OST\)/gi, '')

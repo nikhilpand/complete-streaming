@@ -96,6 +96,7 @@ export class BiniLyricsProvider implements ILyricsProvider {
             const richSync: RichSyncLine[] = lyrics.map((l: any) => ({
               ts: l.time / 1000.0,
               te: (l.time + (l.duration || 2000)) / 1000.0,
+              text: typeof l.text === 'string' ? l.text : undefined,
               l: (l.syllabus || []).map((s: any) => ({
                 c: s.text,
                 o: (s.time - l.time) / 1000.0,

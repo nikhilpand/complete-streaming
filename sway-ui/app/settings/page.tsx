@@ -9,31 +9,24 @@ import {
   LyricsFontFamily,
   LyricsContrast,
   LyricsBlur,
-  LyricsAlign,
   LyricsBackgroundStyle,
   PlayerStageMode,
 } from '@/store/useLyricsSettings';
 import {
-  Sliders,
-  Type,
-  Eye,
-  AlignLeft,
-  AlignCenter,
   Sparkles,
   RotateCcw,
   Music2,
   Disc3,
   Mic2,
   Check,
-  Server,
   Zap,
-  Activity,
   Layers,
-  Volume2,
   Clock,
   ArrowRight,
 } from 'lucide-react';
 import Link from 'next/link';
+import { AudioSettingsSection } from '@/components/settings/AudioSettingsSection';
+import { IntegrationSettingsSection } from '@/components/settings/IntegrationSettingsSection';
 
 export default function SettingsPage() {
   const {
@@ -56,7 +49,6 @@ export default function SettingsPage() {
     setFontFamily,
     setContrast,
     setBlur,
-    setAlign,
     setShowAccentBar,
     setShowRomanized,
     setShowInstrumentalCountdown,
@@ -648,6 +640,12 @@ export default function SettingsPage() {
             <span className="font-semibold text-white/90">Up to 320 kbps (High Quality)</span>
           </div>
         </div>
+
+        {/* Audio Engine & DSP Settings (Sprint 4 & 5 & 6) */}
+        <AudioSettingsSection />
+
+        {/* Scrobbling & Integrations (Sprint 9) */}
+        <IntegrationSettingsSection />
       </div>
     </div>
   );

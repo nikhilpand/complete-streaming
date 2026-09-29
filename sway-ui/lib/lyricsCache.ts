@@ -1,7 +1,7 @@
 'use client';
 
 import { parseLRC, type ParsedLyricLine } from '@/lib/lyric-parser';
-import { isDevanagari, devanagariToRoman } from '@/lib/transliteration';
+import { isDevanagari, devanagariToRoman, isNonLatinScript, romanizeMixedText } from '@/lib/transliteration';
 import { artistNames } from '@/lib/utils';
 import type { Song } from '@/lib/api/types';
 import type { LyricsTimingProvenance } from '@/lib/lyrics-engine/types';
@@ -34,7 +34,7 @@ export interface CachedLyrics {
   };
 }
 
-export const CLIENT_ENGINE_VERSION = 'v4';
+export const CLIENT_ENGINE_VERSION = 'v6';
 export const CACHE_VERSION = `lyrics-${CLIENT_ENGINE_VERSION}`;
 const FOUND_TTL_MS = 20 * 60 * 1000; // 20 minutes (matches server L1 cache)
 const NOT_FOUND_TTL_MS = 15 * 1000;  // 15 seconds short-lived negative cache
@@ -570,13 +570,13 @@ export async function fetchLyricsWithCache(params: {
             time: rawTime,
             endTime: rawEndTime,
             text: rawText,
-            romanized: l.romanized || (isDevanagari(rawText) ? devanagariToRoman(rawText) : undefined),
+            romanized: l.romanized || (isNonLatinScript(rawText) ? romanizeMixedText(rawText) : undefined),
             words: rawWords,
             isInstrumental: Boolean(l.isInstrumental),
           };
         });
 
-        if (doc.isDevanagari || parsedLines.some((l) => isDevanagari(l.text))) {
+        if (doc.isDevanagari || parsedLines.some((l) => isNonLatinScript(l.text))) {
           hasHindiScript = true;
         }
       } else if (doc.lrc) {
@@ -584,9 +584,9 @@ export async function fetchLyricsWithCache(params: {
         parsedLines = parsed.map((l) => ({
           ...l,
           words: [],
-          romanized: isDevanagari(l.text) ? devanagariToRoman(l.text) : undefined,
+          romanized: isNonLatinScript(l.text) ? romanizeMixedText(l.text) : undefined,
         }));
-        if (parsedLines.some((l) => isDevanagari(l.text))) {
+        if (parsedLines.some((l) => isNonLatinScript(l.text))) {
           hasHindiScript = true;
         }
       } else if (doc.plainText || doc.plain) {
@@ -596,11 +596,11 @@ export async function fetchLyricsWithCache(params: {
           time: -1,
           endTime: -1,
           text,
-          romanized: isDevanagari(text) ? devanagariToRoman(text) : undefined,
+          romanized: isNonLatinScript(text) ? romanizeMixedText(text) : undefined,
           words: [],
           isInstrumental: false,
         }));
-        if (parsedLines.some((l) => isDevanagari(l.text))) {
+        if (parsedLines.some((l) => isNonLatinScript(l.text))) {
           hasHindiScript = true;
         }
       }

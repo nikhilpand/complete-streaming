@@ -7,7 +7,7 @@
  * token coverage, and timestamp density.
  */
 
-import { LyricsCandidate, LyricsLine, LyricsWord } from './types';
+import { LyricsCandidate, LyricsLine } from './types';
 
 export interface ValidationResult {
   isValid: boolean;

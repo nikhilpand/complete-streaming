@@ -6,6 +6,7 @@ export interface ParsedWord {
   text: string;
   startTime: number; // in seconds
   endTime: number;   // in seconds
+  romanized?: string;
 }
 
 export interface ParsedLyricLine {
@@ -128,11 +129,11 @@ function parseEnhancedWords(content: string): ParsedWord[] {
 
 export function findActiveIndex(time: number, lines: ParsedLyricLine[]): number {
   if (!lines || lines.length === 0) return -1;
-  if (time < lines[0].time) return 0; // Keep first line in focus during song intro
+  if (time < lines[0].time) return -1; // During intro before first lyric line, no line is active yet
 
   let low = 0;
   let high = lines.length - 1;
-  let result = 0;
+  let result = -1;
 
   while (low <= high) {
     const mid = Math.floor((low + high) / 2);

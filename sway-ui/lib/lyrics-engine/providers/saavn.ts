@@ -11,7 +11,7 @@ import { TrackIdentity, LyricsCandidate } from '../types';
 import { NormalizedMetadata } from '../normalizer';
 import { providerHealthTracker } from '../health';
 
-const BACKEND_BASE = process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+const BACKEND_BASE = (process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 function sanitizeLyricsText(raw: string): string {
   if (!raw) return '';

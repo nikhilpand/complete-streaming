@@ -31,9 +31,11 @@ from app.core.logging_config import (
 )
 from app.providers.saavn.client import SaavnClient
 from app.providers.saavn.provider import SaavnProvider
+from app.providers.spotify.provider import SpotifyProvider
 from app.providers.youtube.provider import YouTubeProvider
 from app.providers.hybrid import HybridMusicProvider
-from app.routers import albums, artists, health, home, lyrics, playlists, queue, recommendations, search, songs
+from app.routers import albums, artists, health, home, lyrics, playlists, queue, search, songs
+from app.routers.recommendations import setup_recsys
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +80,11 @@ async def lifespan(app: FastAPI):
         circuit_breaker=circuit_breaker,
     )
     youtube_provider = YouTubeProvider(cache=cache)
+    spotify_provider = SpotifyProvider(cache=cache)
     provider = HybridMusicProvider(
         saavn_provider=saavn_provider,
         youtube_provider=youtube_provider,
+        spotify_provider=spotify_provider,
     )
 
     # Store on app.state
@@ -88,6 +92,7 @@ async def lifespan(app: FastAPI):
     app.state.cache = cache
     app.state.circuit_breaker = circuit_breaker
     app.state.limiter = limiter
+    app.state.saavn_client = saavn_client
     app.state.provider = provider
 
     logger.info("Application ready")
@@ -175,10 +180,8 @@ def create_app() -> FastAPI:
     app.include_router(playlists.router, prefix=api_prefix)
     app.include_router(artists.router, prefix=api_prefix)
     app.include_router(lyrics.router, prefix=api_prefix)
-    app.include_router(recommendations.router, prefix=api_prefix)
-    app.include_router(recommendations.router)
+    setup_recsys(app)
     app.include_router(home.router, prefix=api_prefix)
-    app.include_router(queue.router, prefix=api_prefix)
     app.include_router(health.router, prefix=api_prefix)
     app.include_router(health.router)
 

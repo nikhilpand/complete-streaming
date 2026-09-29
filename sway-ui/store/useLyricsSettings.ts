@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS = {
   blur: 'light' as LyricsBlur,
   align: 'left' as LyricsAlign,
   showAccentBar: false,
-  showRomanized: false,
+  showRomanized: true,
   layoutMode: 'split' as LyricsLayoutMode,
   stageMode: 'apple' as PlayerStageMode,
   motionBackground: 'dynamic' as 'dynamic' | 'static',
@@ -487,9 +487,9 @@ export function getLyricsCSSVars(settings: LyricsSettingsState) {
   else if (settings.contrast === 'subtle') inactiveOpacity = '0.52';
 
   // Blur
-  let blurVal = '1.2px';
+  let blurVal = '0.8px';
   if (settings.blur === 'off') blurVal = '0px';
-  else if (settings.blur === 'strong') blurVal = '2.2px';
+  else if (settings.blur === 'strong') blurVal = '1.6px';
 
   const textAlign = settings.align || 'left';
   const justifyContent = textAlign === 'center' ? 'center' : 'flex-start';

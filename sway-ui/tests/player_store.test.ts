@@ -94,6 +94,35 @@ describe('Zustand Player Store Hardcore Edge Cases', () => {
     assert.equal(appended.queue[2].id, 's3');
   });
 
+  test('addToQueue on empty queue initializes currentTrack and begins playback', () => {
+    usePlayerStore.setState({ queue: [], currentTrack: null, status: 'idle', queueIndex: 0 });
+    const song = createMockSong('first-song', 'First Song');
+
+    usePlayerStore.getState().addToQueue(song);
+    const state = usePlayerStore.getState();
+
+    assert.equal(state.queue.length, 1);
+    assert.equal(state.queueIndex, 0);
+    assert.equal(state.currentTrack?.id, 'first-song');
+    assert.equal(state.status, 'loading');
+  });
+
+  test('addToQueue appends index to shuffleOrder when isShuffled is active', () => {
+    const songs = [createMockSong('s1', 'Song 1'), createMockSong('s2', 'Song 2')];
+    usePlayerStore.setState({
+      queue: songs,
+      isShuffled: true,
+      shuffleOrder: [1, 0],
+      currentTrack: songs[0],
+    });
+
+    usePlayerStore.getState().addToQueue(createMockSong('s3', 'Song 3'));
+    const state = usePlayerStore.getState();
+
+    assert.equal(state.queue.length, 3);
+    assert.deepEqual(state.shuffleOrder, [1, 0, 2]);
+  });
+
   test('playNext with empty queue does nothing', () => {
     const store = usePlayerStore.getState();
     store.playNext();
@@ -200,16 +229,12 @@ describe('Zustand Player Store Hardcore Edge Cases', () => {
 
   test('playPrev seeks to 0 if currentTime > 3s, otherwise decrements index', () => {
     const songs = [createMockSong('s1', 'Song 1'), createMockSong('s2', 'Song 2')];
-    let seekCalledWith: number | null = null;
 
     usePlayerStore.setState({
       queue: songs,
       queueIndex: 1,
       currentTrack: songs[1],
       currentTime: 10,
-      seekTo: (time: number) => {
-        seekCalledWith = time;
-      },
     });
 
     // 1. CurrentTime > 3s -> stays at index 1 and resets currentTime to 0

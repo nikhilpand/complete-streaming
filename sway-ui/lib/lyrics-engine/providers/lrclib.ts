@@ -48,6 +48,9 @@ export class LrclibLyricsProvider implements ILyricsProvider {
         instrumental: Boolean(item.instrumental),
         sourceReference: `https://lrclib.net/api/get/${item.id}`,
         fetchedAtMs: Date.now(),
+        timingProvenance: item.syncedLyrics ? 'LINE' : 'PLAIN',
+        timingConfidence: item.syncedLyrics ? 0.90 : 0.70,
+        providerConfidence: 0.92,
       });
     };
 

@@ -90,6 +90,7 @@ export class MusixmatchLyricsProvider implements ILyricsProvider {
       trackId: number;
       trackName: string;
       artistName: string;
+      trackLength: number;
       hasSubtitles: boolean;
       hasRichSync: boolean;
     }> = [];
@@ -125,6 +126,7 @@ export class MusixmatchLyricsProvider implements ILyricsProvider {
                 trackId: t.track_id,
                 trackName: t.track_name || identity.title,
                 artistName: t.artist_name || normalized.primaryArtist,
+                trackLength: typeof t.track_length === 'number' && t.track_length > 0 ? t.track_length * 1000 : 0,
                 hasSubtitles: Boolean(t.has_subtitles),
                 hasRichSync: Boolean(t.has_richsync),
               });
@@ -192,10 +194,17 @@ export class MusixmatchLyricsProvider implements ILyricsProvider {
       }
 
       if (candidateRichSync || candidateSyncedLrc) {
-        let derivedDurationMs = identity.durationMs;
+        let derivedDurationMs: number | undefined = t.trackLength > 0 ? t.trackLength : undefined;
         if (candidateRichSync && candidateRichSync.length > 0) {
           const lastLine = candidateRichSync[candidateRichSync.length - 1];
           if (lastLine?.te) derivedDurationMs = Math.round(lastLine.te * 1000);
+        } else if (candidateSyncedLrc && (!derivedDurationMs || derivedDurationMs === 0)) {
+          const lastMatch = [...candidateSyncedLrc.matchAll(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g)].pop();
+          if (lastMatch) {
+            const mins = parseInt(lastMatch[1], 10);
+            const secs = parseInt(lastMatch[2], 10);
+            derivedDurationMs = (mins * 60 + secs + 3) * 1000;
+          }
         }
 
         candidates.push({
@@ -208,10 +217,10 @@ export class MusixmatchLyricsProvider implements ILyricsProvider {
           syncedLyrics: candidateSyncedLrc,
           instrumental: false,
           sourceReference: `Musixmatch Track #${t.trackId}`,
-          providerConfidence: candidateRichSync ? 0.98 : 0.94,
+          providerConfidence: candidateRichSync ? 0.98 : 0.92,
           fetchedAtMs: Date.now(),
           timingProvenance: candidateRichSync ? 'AUTHENTIC_WORD' : 'LINE',
-          timingConfidence: candidateRichSync ? 0.96 : 0.88,
+          timingConfidence: candidateRichSync ? 0.96 : (t.trackLength > 0 ? 0.88 : 0.75),
         });
       }
     }

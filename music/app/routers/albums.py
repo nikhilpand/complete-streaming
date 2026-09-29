@@ -14,11 +14,13 @@ from app.models import APIResponse
 
 router = APIRouter(prefix="/albums", tags=["Albums"])
 
-_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,30}$")
+_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
 def _validate_id(album_id: str) -> str:
     aid = album_id.strip()
+    if ":" in aid:
+        aid = aid.split(":", 1)[1]
     if not _ID_RE.match(aid):
         raise ProviderInvalidRequest(f"Invalid album ID format: {aid!r}", provider="saavn")
     return aid

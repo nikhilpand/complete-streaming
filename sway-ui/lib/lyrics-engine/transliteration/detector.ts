@@ -1,15 +1,12 @@
 /**
  * detector.ts
  * Unicode Script Detection (Section 23)
+ * Focused strictly on Devanagari (Hindi) and Gurmukhi (Punjabi).
  */
 
 export type IndicScript =
   | 'Devanagari'
   | 'Gurmukhi'
-  | 'Bengali'
-  | 'Tamil'
-  | 'Telugu'
-  | 'ArabicUrdu'
   | 'Latin'
   | 'Unknown';
 
@@ -18,10 +15,6 @@ export function detectScript(text: string): IndicScript {
 
   if (/[\u0900-\u097F]/.test(text)) return 'Devanagari';
   if (/[\u0A00-\u0A7F]/.test(text)) return 'Gurmukhi';
-  if (/[\u0980-\u09FF]/.test(text)) return 'Bengali';
-  if (/[\u0B80-\u0BFF]/.test(text)) return 'Tamil';
-  if (/[\u0C00-\u0C7F]/.test(text)) return 'Telugu';
-  if (/[\u0600-\u06FF]/.test(text)) return 'ArabicUrdu';
   if (/[a-zA-Z]/.test(text)) return 'Latin';
 
   return 'Unknown';
@@ -29,4 +22,12 @@ export function detectScript(text: string): IndicScript {
 
 export function isDevanagariScript(text: string): boolean {
   return /[\u0900-\u097F]/.test(text);
+}
+
+export function isGurmukhiScript(text: string): boolean {
+  return /[\u0A00-\u0A7F]/.test(text);
+}
+
+export function isNonLatinScript(text: string): boolean {
+  return isDevanagariScript(text) || isGurmukhiScript(text);
 }

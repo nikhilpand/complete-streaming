@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Check, Copy, Download, Share2, Sparkles, Image as ImageIcon } from 'lucide-react';
 import type { ParsedLyricLine } from '@/lib/lyric-parser';
 import { getProxiedImageUrl } from '@/lib/api';
+import { useOverlayHistory } from '@/lib/hooks/useOverlayHistory';
 
 export type CardTheme = 'artwork' | 'gradient' | 'oled' | 'editorial';
 export type CardAspect = 'square' | 'story';
@@ -30,6 +31,7 @@ export function LyricShareCardModal({
   lyrics,
   initialActiveIndex = 0,
 }: LyricShareCardModalProps) {
+  useOverlayHistory(isOpen, onClose, 'modal-lyric-share-card');
   // Filter out empty lines
   const validLines = useMemo(() => {
     return lyrics
@@ -52,7 +54,6 @@ export function LyricShareCardModal({
   const [exportError, setExportError] = useState<string | null>(null);
 
   const previewCardRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Sync selected index when opening
   useEffect(() => {

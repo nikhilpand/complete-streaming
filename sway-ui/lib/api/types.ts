@@ -145,21 +145,56 @@ export interface QueueTrack {
 export interface QueueNextResponse {
   current_track_id: string;
   queue: QueueTrack[];
+  tracks?: QueueTrack[];
   count: number;
+  session_id?: string;
 }
 
 export interface RecommendationTrack {
   id: string;
+  saavn_id?: string;
+  ytm_video_id?: string;
   title: string;
-  artist: string;
+  artist?: string;
+  artists?: string[] | ArtistSummary[];
   album?: string;
   artwork_url?: string;
+  image?: string;
+  duration?: number;
+  duration_ms?: number;
+  language?: string;
   genre?: string;
   mood?: string;
   score?: number;
   source?: string;
+  sources?: string[];
   explanation?: string;
   badge?: string;
+  playback?: string;
+  match_confidence?: number;
+}
+
+export interface RadioResponse {
+  seed: any;
+  tracks: RecommendationTrack[];
+  tuning_chips?: Array<{ id: string; title: string; playlist_id?: string; params?: string }>;
+  session_id: string;
+  related_browse_id?: string;
+  sources_used: string[];
+  latency_ms: number;
+}
+
+export interface QuickPicksResponse {
+  quick_picks: RecommendationTrack[];
+  cached?: boolean;
+  user_type?: string;
+}
+
+export interface RelatedResponse {
+  seed: any;
+  related_tracks?: RecommendationTrack[];
+  similar_artists?: any[];
+  sources_used?: string[];
 }
 
 export interface UserTasteProfile {

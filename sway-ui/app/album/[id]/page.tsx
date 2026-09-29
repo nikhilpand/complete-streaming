@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { use } from 'react';
 import { Play, Shuffle, Clock } from 'lucide-react';
 import { getAlbum } from '@/lib/api/albums';
@@ -18,14 +18,14 @@ export default function AlbumPage({ params }: { params: Promise<{ id: string }> 
   const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
   const setQueue = usePlayerStore((s) => s.setQueue);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true); setError(null);
     try { setAlbum(await getAlbum(id)); }
     catch { setError("Couldn't load this album."); }
     finally { setLoading(false); }
-  }
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); }, [load]);
 
   const songs = album?.songs ?? [];
 

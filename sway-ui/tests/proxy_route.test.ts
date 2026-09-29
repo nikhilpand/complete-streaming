@@ -1,7 +1,7 @@
 import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GET, POST, PATCH } from '../app/api/proxy/[...path]/route';
+import { GET, POST, PUT, PATCH, DELETE } from '../app/api/proxy/[...path]/route';
 
 describe('Next.js App Router Proxy Route Hardcore Tests', () => {
   const originalFetch = globalThis.fetch;
@@ -53,7 +53,7 @@ describe('Next.js App Router Proxy Route Hardcore Tests', () => {
     } as any;
   }
 
-  test('path sanitization strips saavn: prefix but preserves youtube: and yt: prefixes', async () => {
+  test('path sanitization strips saavn: prefix but preserves youtube:, yt:, and spotify: prefixes', async () => {
     // 1. saavn: stripped
     const req1 = createMockRequest('http://localhost:3000/api/proxy/songs/saavn:track_123');
     await GET(req1, { params: Promise.resolve({ path: ['songs', 'saavn:track_123'] }) });
@@ -69,6 +69,11 @@ describe('Next.js App Router Proxy Route Hardcore Tests', () => {
     const req3 = createMockRequest('http://localhost:3000/api/proxy/songs/yt:short_456');
     await GET(req3, { params: Promise.resolve({ path: ['songs', 'yt:short_456'] }) });
     assert.ok(interceptedFetchUrl?.includes('/api/v1/songs/yt:short_456'));
+
+    // 4. spotify: preserved
+    const req4 = createMockRequest('http://localhost:3000/api/proxy/playlists/spotify:playlist:37i9dQZF1DXcBWIGoYBM5M');
+    await GET(req4, { params: Promise.resolve({ path: ['playlists', 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M'] }) });
+    assert.ok(interceptedFetchUrl?.includes('/api/v1/playlists/spotify:playlist:37i9dQZF1DXcBWIGoYBM5M'));
   });
 
   test('query parameter boundaries sanitized (page >= 1, n in 1..50)', async () => {
@@ -88,6 +93,14 @@ describe('Next.js App Router Proxy Route Hardcore Tests', () => {
     const called2 = new URL(interceptedFetchUrl!);
     assert.equal(called2.searchParams.get('page'), '1');
     assert.equal(called2.searchParams.get('n'), '20'); // Invalid < 1 resets to 20
+
+    // 0-indexed endpoint (artists) preserves page=0
+    const req3 = createMockRequest('http://localhost:3000/api/proxy/artists/459345/songs?page=0&n=30');
+    await GET(req3, { params: Promise.resolve({ path: ['artists', '459345', 'songs'] }) });
+
+    const called3 = new URL(interceptedFetchUrl!);
+    assert.equal(called3.searchParams.get('page'), '0');
+    assert.equal(called3.searchParams.get('n'), '30');
   });
 
   test('user identity and telemetry headers forwarded to upstream', async () => {
@@ -128,10 +141,11 @@ describe('Next.js App Router Proxy Route Hardcore Tests', () => {
     assert.equal(interceptedFetchOptions?.body, JSON.stringify(payload));
   });
 
-  test('PATCH forwards JSON body correctly', async () => {
+  test('PATCH forwards JSON body and headers correctly', async () => {
     const payload = { name: 'Updated Playlist' };
     const req = createMockRequest('http://localhost:3000/api/proxy/playlists/p1', {
       method: 'PATCH',
+      headers: { 'x-sway-user-id': 'u_tester' },
       body: payload,
     });
 
@@ -139,6 +153,45 @@ describe('Next.js App Router Proxy Route Hardcore Tests', () => {
 
     assert.equal(interceptedFetchOptions?.method, 'PATCH');
     assert.equal(interceptedFetchOptions?.body, JSON.stringify(payload));
+    const headers = interceptedFetchOptions?.headers as Record<string, string>;
+    assert.equal(headers['x-sway-user-id'], 'u_tester');
+  });
+
+  test('PUT forwards JSON body and headers correctly', async () => {
+    const payload = { title: 'New Title' };
+    const req = createMockRequest('http://localhost:3000/api/proxy/playlists/p1', {
+      method: 'PUT',
+      headers: { 'x-sway-user-id': 'u_tester' },
+      body: payload,
+    });
+
+    await PUT(req, { params: Promise.resolve({ path: ['playlists', 'p1'] }) });
+
+    assert.equal(interceptedFetchOptions?.method, 'PUT');
+    assert.equal(interceptedFetchOptions?.body, JSON.stringify(payload));
+    const headers = interceptedFetchOptions?.headers as Record<string, string>;
+    assert.equal(headers['x-sway-user-id'], 'u_tester');
+  });
+
+  test('DELETE forwards method correctly', async () => {
+    const req = createMockRequest('http://localhost:3000/api/proxy/playlists/p1', {
+      method: 'DELETE',
+      headers: { 'x-sway-user-id': 'u_tester' },
+    });
+
+    await DELETE(req, { params: Promise.resolve({ path: ['playlists', 'p1'] }) });
+
+    assert.equal(interceptedFetchOptions?.method, 'DELETE');
+    const headers = interceptedFetchOptions?.headers as Record<string, string>;
+    assert.equal(headers['x-sway-user-id'], 'u_tester');
+  });
+
+  test('path traversal attempts are rejected with 400 INVALID_PATH', async () => {
+    const req = createMockRequest('http://localhost:3000/api/proxy/../../../etc/passwd');
+    const res = await GET(req, { params: Promise.resolve({ path: ['..', '..', 'etc', 'passwd'] }) });
+    assert.equal(res.status, 400);
+    const data = await res.json();
+    assert.equal(data.error_code, 'INVALID_PATH');
   });
 
   test('upstream network error or timeout returns 503 PROXY_ERROR safely', async () => {

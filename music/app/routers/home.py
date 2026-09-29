@@ -1,106 +1,90 @@
 """
-SWAY Home Router — Multi-Shelf YouTube-Music-Style Progressive Feed
-Composes rich differentiated shelves (Trending, Popular Regional, Made For You,
-Because You Listened, Artist Radar, Recently Played, Rediscover, Discover Something New)
-with zero mock data and natural progressive personalization.
+SWAY Home Router — Multi-Shelf Progressive Feed
+Composes rich, non-duplicated shelves powered by the unified recsys engine and JioSaavn.
+Supports cold -> seeded -> personalized user lifecycle evolution.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import sys
-from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query, Request
-
-# Ensure sway_taste_engine is importable
-repo_root = Path(__file__).resolve().parents[3]
-taste_engine_dir = repo_root / "sway_taste_engine"
-if str(taste_engine_dir) not in sys.path:
-    sys.path.insert(0, str(taste_engine_dir))
+from fastapi import APIRouter, Header, Query, Request
 
 from app.models import APIResponse
-from app.routers.recommendations import get_taste_engine, song_to_engine_track
-from sway_taste_engine.mix_planner import MixPlanner
-from sway_taste_engine.models import Track
-from sway_taste_engine.normalizer import canonical_song_key, is_derivative_track, normalize_title
+from app.recsys import hash_user
+from app.recsys.ranker import build_profile
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/home", tags=["home"])
 
 DEFAULT_HOME_QUERIES = [
-    "top bollywood hits",
-    "trending songs hindi",
-    "arijit singh hits",
-    "atif aslam romantic",
-    "chill acoustic hindi",
+    ("bollywood_hits", "Top Bollywood Hits", "Trending Bollywood favourites", "Bollywood", "top bollywood hits", "discovery"),
+    ("chill_hindi", "Melodic & Acoustic", "Chill, relaxing melodic tracks", "Chill", "chill acoustic hindi", "discovery"),
+    ("arijit_spotlight", "Arijit Singh Essentials", "Top romantic anthems by Arijit Singh", "Artist", "arijit singh hits", "discovery"),
+    ("punjabi_pop", "Punjabi Pop Hits", "High-energy chartbusters", "Trending", "trending punjabi hits", "discovery"),
 ]
 
-_seed_lock = asyncio.Lock()
+
+def _cand_to_song_dict(t: dict) -> dict:
+    sid = t.get("saavn_id") or t.get("id") or ""
+    vid = t.get("ytm_video_id") or ""
+    prov = "saavn" if sid and not sid.startswith("youtube:") else "youtube"
+    pid = sid if prov == "saavn" else vid
+    full_id = sid or (f"youtube:{vid}" if vid else "")
+    artists = t.get("artists") or []
+    if isinstance(artists, str):
+        artists = [artists]
+    artist_name = t.get("artist") or (", ".join(artists) if artists else "Unknown Artist")
+    return {
+        "id": full_id,
+        "provider": prov,
+        "provider_id": pid,
+        "type": "song",
+        "title": t.get("title", ""),
+        "subtitle": artist_name,
+        "artist_name": artist_name,
+        "artists": [{"id": "", "name": a, "role": "primary"} for a in artists] if artists else [{"id": "", "name": artist_name, "role": "primary"}],
+        "album": t.get("album", ""),
+        "duration_ms": int((t.get("duration") or 0) * 1000),
+        "artwork_url": t.get("image", ""),
+        "language": t.get("language", ""),
+        "has_media": True,
+        "is_explicit": bool(t.get("explicit", False)),
+    }
 
 
-def is_valid_catalog_track(t: Track) -> bool:
-    """Validate that a track has genuine metadata and artwork before feeding to Home."""
-    if not t or not getattr(t, "id", None):
-        return False
-    if not t.artwork_url or not str(t.artwork_url).strip():
-        return False
-    if is_derivative_track(t.title or "", t.artist_name or ""):
-        return False
-    t_title = (t.title or "").strip().lower()
-    if not t_title or t_title.startswith("track ") or t_title.startswith("sample track") or t_title.startswith("debug"):
-        return False
-    t_artist = (t.artist_name or "").strip().lower()
-    if not t_artist or t_artist in ("unknown artist", "unknown", "artist 0", "none", "null"):
-        return False
-    t_artist_id = (t.artist_id or "").strip().lower()
-    if not t_artist_id or t_artist_id in ("artist_unknown", "unknown", "none", "null") or t_artist_id.startswith("unknown"):
-        return False
-    if t.id.startswith("debug") or t.id.startswith("track_seed_"):
-        return False
-    return True
-
-
-async def _seed_catalog_if_empty(request: Request, engine) -> List[Track]:
-    """Hydrate catalog from provider if store contains fewer than 25 valid tracks (with in-flight coalescing)."""
-    valid_catalog = [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
-    if len(valid_catalog) >= 25:
-        return valid_catalog
-
-    async with _seed_lock:
-        # Double check after acquiring lock
-        valid_catalog = [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
-        if len(valid_catalog) >= 25:
-            return valid_catalog
-
-        provider = getattr(request.app.state, "provider", None)
-        if provider:
-            try:
-                for q in DEFAULT_HOME_QUERIES:
-                    res = await provider.search(q, n=10)
-                    songs = getattr(res, "enriched_songs", None) or getattr(res, "songs", None) or []
-                    if songs:
-                        for s_item in songs:
-                            try:
-                                # If item is already full Song, convert directly
-                                if hasattr(s_item, "duration_ms") and s_item.duration_ms:
-                                    track = song_to_engine_track(s_item)
-                                else:
-                                    full_song = await provider.get_song(s_item.id)
-                                    track = song_to_engine_track(full_song or s_item)
-                                if track and is_valid_catalog_track(track):
-                                    engine.store.upsert_tracks([track])
-                            except Exception:
-                                pass
-                    valid_catalog = [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
-                    if len(valid_catalog) >= 35:
-                        break
-            except Exception as e:
-                logger.warning("Could not auto-seed home catalog from provider: %s", e)
-
-        return [t for t in engine.store.all_tracks() if is_valid_catalog_track(t)]
+def _provider_song_to_dict(s: Any) -> dict:
+    prov = getattr(s, "provider", "saavn") or "saavn"
+    pid = getattr(s, "provider_id", None) or getattr(s, "id", "")
+    full_id = getattr(s, "id", "") or f"{prov}:{pid}"
+    artists = getattr(s, "artists", []) or []
+    art_dicts = []
+    if artists:
+        for a in artists:
+            if hasattr(a, "name"):
+                art_dicts.append({"id": getattr(a, "id", "") or "", "name": a.name, "role": getattr(a, "role", "primary")})
+            elif isinstance(a, dict):
+                art_dicts.append(a)
+    subtitle = getattr(s, "subtitle", "") or (art_dicts[0]["name"] if art_dicts else "Unknown Artist")
+    return {
+        "id": full_id,
+        "provider": prov,
+        "provider_id": pid,
+        "type": "song",
+        "title": getattr(s, "title", ""),
+        "subtitle": subtitle,
+        "artist_name": subtitle,
+        "artists": art_dicts if art_dicts else [{"id": "", "name": subtitle, "role": "primary"}],
+        "album": getattr(s, "album", ""),
+        "duration_ms": getattr(s, "duration_ms", 0) or 0,
+        "artwork_url": getattr(s, "artwork_url", "") or "",
+        "language": getattr(s, "language", "") or "",
+        "has_media": True,
+        "is_explicit": getattr(s, "is_explicit", False),
+    }
 
 
 @router.get("", response_model=APIResponse, summary="Get personalized multi-shelf home feed")
@@ -109,126 +93,189 @@ async def get_home_feed(
     request: Request,
     user_id: Optional[str] = Query(None, description="Optional user ID override"),
     limit_per_shelf: int = Query(10, ge=4, le=30, description="Max items per shelf"),
+    x_sway_user_id: Optional[str] = Header(None),
 ):
     """
     Retrieve YouTube-Music-style progressive Home feed:
-    - COLD users: Discovery-first shelves (Trending, Popular in India, New Releases, Discover Something New, Chill & Melodic).
-    - SEEDED users: Early personalization (Made for You, Because You Listened, Artist Radar, Trending, Discover).
-    - LEARNING users: Balanced mix (Made for You, Because You Listened, Recently Played, Artists You Like, New Music for You, Discover).
-    - PERSONALIZED users: Deep personalization with continued exploration (Made for You, Because You Listened, Your Artists, Recently Played, Rediscover, Trending for You, Discover Different).
+    - COLD users: Discovery shelves with state="cold"
+    - SEEDED/PERSONALIZED users: Quick mix & personalized shelves
+    - Full cross-shelf deduplication & dislike filtering
     """
     effective_user_id = (
         user_id
+        or x_sway_user_id
         or request.headers.get("x-sway-user-id")
         or request.headers.get("x-sway-anon-id")
         or "anon-default"
     )
 
-    engine = get_taste_engine()
-    profile = engine.store.get_profile(effective_user_id)
+    recs = getattr(request.app.state, "recs", None)
+    quick_picks = getattr(request.app.state, "quick_picks", None)
+    provider = getattr(request.app.state, "provider", None)
 
-    raw_catalog = await _seed_catalog_if_empty(request, engine)
-    catalog = [t for t in raw_catalog if is_valid_catalog_track(t)]
+    user_hash = hash_user(effective_user_id, recs.s.user_salt) if (recs and recs.s.user_salt) else None
 
-    # If catalog is still empty (e.g. offline and no provider), return empty shelves without fake mock tracks
-    if not catalog:
-        return APIResponse(
-            success=True,
-            data={
-                "user_id": effective_user_id,
-                "state": profile.personalization_state.value,
-                "shelves": [],
-            },
-        )
+    # Determine user lifecycle state from events in Store
+    blocked_ids = set()
+    user_event_count = 0
+    recent_seed_track = None
+    if recs and user_hash:
+        now = time.time()
+        evts = recs.store.user_events(user_hash, now - 90 * 86400, ("complete", "like", "skip", "dislike", "play_start"))
+        user_event_count = len(evts)
+        if evts:
+            recent_seed_track = evts[0][1]  # tid of most recent event
+        try:
+            profile = build_profile(recs.store, user_hash, recs.s)
+            blocked_ids = profile.blocked_ids
+        except Exception:
+            pass
 
-    planner = MixPlanner(store=engine.store)
-    shelves = planner.plan_home_feed(profile, catalog, limit_per_shelf=limit_per_shelf)
+    if user_event_count == 0:
+        lifecycle_state = "cold"
+    elif user_event_count < 5:
+        lifecycle_state = "seeded"
+    else:
+        lifecycle_state = "personalized"
 
-    shelves_data = []
-    for s in shelves:
-        shelf_items = []
-        seen_shelf_song_keys: set[tuple[str, str]] = set()
-        seen_shelf_titles: set[str] = set()
-        for t in s.items:
-            if is_derivative_track(getattr(t, "title", ""), getattr(t, "artist_name", "")):
-                continue
-            norm_title = normalize_title(getattr(t, "title", ""))
-            if norm_title and norm_title in seen_shelf_titles:
-                continue
-            c_key = canonical_song_key(
-                title=getattr(t, "title", ""),
-                artist_name=getattr(t, "artist_name", ""),
-                fallback_id=getattr(t, "id", ""),
-                album=getattr(t, "album", ""),
-            )
-            if c_key in seen_shelf_song_keys:
-                continue
-            seen_shelf_song_keys.add(c_key)
-            if norm_title:
-                seen_shelf_titles.add(norm_title)
+    global_seen: set[str] = set()
+    shelves_data: list[dict[str, Any]] = []
 
-            prov = getattr(t, "provider", None)
-            p_id = getattr(t, "provider_id", None)
-            if not prov or not p_id:
-                if ":" in t.id:
-                    prov, p_id = t.id.split(":", 1)
-                else:
-                    prov = "saavn"
-                    p_id = t.id
+    def _is_allowed(item_id: str, title: str) -> bool:
+        if not item_id or item_id in blocked_ids or item_id in global_seen:
+            return False
+        clean_title = (title or "").lower().strip()
+        if not clean_title or "sample track" in clean_title:
+            return False
+        return True
 
-            full_id = f"{prov}:{p_id}" if prov == "youtube" and not t.id.startswith(("youtube:", "yt:")) else t.id
-            has_media = getattr(t, "has_media", None)
-            if has_media is None:
-                if isinstance(getattr(t, "provider_available", None), dict) and prov in t.provider_available:
-                    has_media = t.provider_available[prov]
-                else:
-                    has_media = True
+    # 1. Quick Picks Shelf (when seeded/personalized)
+    if lifecycle_state in {"seeded", "personalized"} and quick_picks:
+        try:
+            qp_res = await quick_picks.get(user=user_hash, recent_ids=[], limit=limit_per_shelf)
+            items = []
+            for it in qp_res.get("items", []):
+                s_dict = _cand_to_song_dict(it)
+                if _is_allowed(s_dict["id"], s_dict["title"]):
+                    global_seen.add(s_dict["id"])
+                    items.append(s_dict)
+            if items:
+                shelves_data.append({
+                    "id": "quick_picks",
+                    "type": "quick_mix",
+                    "title": "Quick Picks",
+                    "subtitle": "Start radio from songs you love",
+                    "badge": "For You",
+                    "items": items,
+                })
+        except Exception as ex:
+            logger.warning("Quick picks shelf error: %s", ex)
 
-            shelf_items.append(
-                {
-                    "id": full_id,
-                    "provider": prov,
-                    "provider_id": p_id,
-                    "type": "song",
-                    "title": t.title,
-                    "subtitle": t.artist_name,
-                    "artist_name": t.artist_name,
-                    "artists": (
-                        [{"id": a.id, "name": a.name, "role": a.role, "image_url": a.image_url} for a in t.artists]
-                        if t.artists
-                        else [{"id": t.artist_id, "name": t.artist_name, "role": "primary"}]
-                    ),
-                    "album": t.album,
-                    "album_id": t.album_id,
-                    "year": t.year,
-                    "language": t.language,
-                    "duration_ms": t.duration_ms,
-                    "artwork_url": t.artwork_url,
-                    "has_media": has_media,
-                    "energy": t.energy,
-                    "popularity": t.popularity,
-                }
-            )
+    # 2. Similarity Shelf ("Because you listened to...")
+    if lifecycle_state in {"seeded", "personalized"} and recs and recent_seed_track:
+        try:
+            radio_res = await recs.radio(track_id=recent_seed_track, user=user_hash, limit=limit_per_shelf)
+            seed_info = radio_res.get("seed", {})
+            seed_title = seed_info.get("title") or "recent music"
+            sim_items = []
+            for t in radio_res.get("tracks", []):
+                s_dict = _cand_to_song_dict(t)
+                if _is_allowed(s_dict["id"], s_dict["title"]):
+                    global_seen.add(s_dict["id"])
+                    sim_items.append(s_dict)
+            if sim_items:
+                shelves_data.append({
+                    "id": "similarity_shelf",
+                    "type": "similarity",
+                    "title": f"Similar to {seed_title}",
+                    "subtitle": f"Recommended based on your interest in {seed_title}",
+                    "badge": "Because You Listened",
+                    "items": sim_items,
+                })
+        except Exception as ex:
+            logger.debug("Similarity shelf error: %s", ex)
 
-        if shelf_items:
-            shelves_data.append(
-                {
-                    "id": s.id,
-                    "type": s.type,
-                    "title": s.title,
-                    "subtitle": s.subtitle,
-                    "badge": s.badge,
-                    "reason": s.reason,
-                    "items": shelf_items,
-                }
-            )
+    # 3. Trending in India
+    if recs:
+        try:
+            trending_tracks = await recs.trending(limit=limit_per_shelf + len(global_seen))
+            items = []
+            for t in trending_tracks:
+                s_dict = _cand_to_song_dict(t.to_public())
+                if _is_allowed(s_dict["id"], s_dict["title"]):
+                    global_seen.add(s_dict["id"])
+                    items.append(s_dict)
+                if len(items) >= limit_per_shelf:
+                    break
+            if items:
+                shelves_data.append({
+                    "id": "trending_india",
+                    "type": "trending",
+                    "title": "Trending in India",
+                    "subtitle": "Top hits right now across YouTube Music & JioSaavn",
+                    "badge": "Trending",
+                    "items": items,
+                })
+        except Exception as ex:
+            logger.warning("Trending shelf error: %s", ex)
 
+    # 4. Curated Discovery Shelves
+    fetch_client = provider or (getattr(recs, "saavn", None) if recs else None)
+    if fetch_client:
+        async def _fetch_shelf(shelf_id: str, title: str, subtitle: str, badge: str, query: str, shelf_type: str):
+            try:
+                items = []
+                if hasattr(fetch_client, "search"):
+                    res = await fetch_client.search(query, n=limit_per_shelf + 5)
+                    raw_songs = getattr(res, "enriched_songs", None) or getattr(res, "songs", None) or []
+                    for s in raw_songs:
+                        s_dict = _provider_song_to_dict(s)
+                        if _is_allowed(s_dict["id"], s_dict["title"]):
+                            items.append(s_dict)
+                        if len(items) >= limit_per_shelf:
+                            break
+                elif hasattr(fetch_client, "search_songs"):
+                    cands = await fetch_client.search_songs(query, limit=limit_per_shelf + 5)
+                    for c in cands:
+                        s_dict = _cand_to_song_dict(c.to_public())
+                        if _is_allowed(s_dict["id"], s_dict["title"]):
+                            items.append(s_dict)
+                        if len(items) >= limit_per_shelf:
+                            break
+                if items:
+                    return {
+                        "id": shelf_id,
+                        "type": shelf_type,
+                        "title": title,
+                        "subtitle": subtitle,
+                        "badge": badge,
+                        "items": items,
+                    }
+            except Exception as e:
+                logger.debug("Failed to fetch shelf %s: %s", shelf_id, e)
+            return None
+
+        shelf_tasks = [
+            _fetch_shelf(sid, stitle, ssub, sbadge, sq, stype)
+            for sid, stitle, ssub, sbadge, sq, stype in DEFAULT_HOME_QUERIES
+        ]
+        results = await asyncio.gather(*shelf_tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, dict) and r.get("items"):
+                filtered_items = []
+                for it in r["items"]:
+                    if it["id"] not in global_seen and it["id"] not in blocked_ids:
+                        global_seen.add(it["id"])
+                        filtered_items.append(it)
+                if filtered_items:
+                    r["items"] = filtered_items
+                    shelves_data.append(r)
 
     return APIResponse(
         success=True,
         data={
             "user_id": effective_user_id,
-            "state": profile.personalization_state.value,
+            "state": lifecycle_state,
             "shelves": shelves_data,
         },
     )

@@ -9,39 +9,28 @@ import { audioManager } from '@/lib/audio/AudioManager';
 import {
   ChevronDown, Play, Pause, SkipBack, SkipForward,
   Shuffle, Repeat, Repeat1, Loader2, X, Music2, RotateCcw,
-  Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles, Share2,
+  Volume2, VolumeX, Volume1, Heart, ListMusic, Sparkles,
   MessageSquareQuote, MoreHorizontal, Maximize2, Minimize2,
-  Disc3, Mic2, Sliders,
+  Disc3, Mic2, Sliders, Share2, Check, Download,
 } from 'lucide-react';
 import { findActiveIndex, type ParsedLyricLine } from '@/lib/lyric-parser';
 import { getProxiedImageUrl } from '@/lib/api';
 import { getCachedLyrics, fetchLyricsWithCache } from '@/lib/lyricsCache';
-import { isDevanagari, devanagariToRoman } from '@/lib/transliteration';
+import { isNonLatinScript, romanizeMixedText } from '@/lib/transliteration';
 import Link from 'next/link';
 import {
   useLyricsSettings,
   getLyricsCSSVars,
-  type LyricsLayoutMode,
-  type LyricsBackgroundStyle,
-  type PlayerStageMode,
 } from '@/store/useLyricsSettings';
 import { DesktopLyricsProgressBar } from './lyrics/DesktopLyricsProgressBar';
 import { MobileLyricsControls } from './lyrics/MobileLyricsControls';
 import { LyricShareCardModal } from './lyrics/LyricShareCardModal';
-import { sendTelemetry } from '@/lib/api/telemetry';
 import type { RecommendationTrack } from '@/lib/api/types';
 import { Artwork } from '@/components/artwork/Artwork';
 import { artistNames } from '@/lib/utils';
-import type { LyricsTimingProvenance, LyricsSyncType } from '@/lib/lyrics-engine/types';
-
-
-// ─── Format Time mm:ss ──────────────────────────────────────────────────
-function formatTime(sec: number): string {
-  if (!sec || isNaN(sec) || sec < 0) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
+import { useLikedSongs } from '@/store/useLikedSongs';
+import { downloadSong, type DownloadStatus } from '@/lib/download';
+import type { LyricsTimingProvenance } from '@/lib/lyrics-engine/types';
 
 // ─── Lyric Line (memoised — never re-renders post-mount) ─────────────────
 const LyricLine = memo(({
@@ -71,9 +60,10 @@ const LyricLine = memo(({
     );
   }
 
-  const shouldRomanize = Boolean(showRomanized && (line.romanized || isDevanagari(line.text)));
+  const hasNonLatin = isNonLatinScript(line.text);
+  const shouldRomanize = Boolean(showRomanized && (line.romanized || hasNonLatin));
   const displayText = shouldRomanize
-    ? (line.romanized || (isDevanagari(line.text) ? devanagariToRoman(line.text) : line.text))
+    ? (line.romanized || romanizeMixedText(line.text))
     : line.text;
 
   const hasWords = Array.isArray(line.words) && line.words.length > 0;
@@ -81,7 +71,7 @@ const LyricLine = memo(({
     ? (shouldRomanize
         ? line.words.map((w) => ({
             ...w,
-            text: isDevanagari(w.text) ? devanagariToRoman(w.text) : w.text,
+            text: w.romanized || (isNonLatinScript(w.text) ? romanizeMixedText(w.text) : w.text),
           }))
         : line.words)
     : [];
@@ -102,6 +92,14 @@ const LyricLine = memo(({
       ) : (
         <span className="blyrics--line-text">
           {displayText}
+        </span>
+      )}
+      {shouldRomanize && line.text && line.text !== displayText && (
+        <span
+          className="blyrics--script-subtext block text-xs font-normal opacity-40 hover:opacity-75 transition-opacity tracking-wide mt-1 select-none font-sans"
+          dir="auto"
+        >
+          {line.text}
         </span>
       )}
     </div>
@@ -155,14 +153,35 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   // Lyrics settings
   const lyricsSettings = useLyricsSettings();
 
-  // Local UI states
-  const [isLiked, setIsLiked] = useState(false);
+  // Liked songs store
+  const isLiked = useLikedSongs((s) => s.isLiked(rawTrack?.id));
+  const toggleTrackLike = useLikedSongs((s) => s.toggleLike);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTickerLine, setCurrentTickerLine] = useState('');
   const [recommendations, setRecommendations] = useState<RecommendationTrack[]>([]);
   const [recsLoading, setRecsLoading] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>('idle');
+
+  const handleCopySongLink = useCallback(() => {
+    if (!rawTrack) return;
+    const url = `${window.location.origin}/song/${encodeURIComponent(rawTrack.id)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2200);
+    });
+  }, [rawTrack]);
+
+  const handleDownload = useCallback(async () => {
+    if (!rawTrack) return;
+    try {
+      await downloadSong(rawTrack, (s) => setDownloadStatus(s));
+    } catch {
+      // Handled in downloadSong
+    }
+  }, [rawTrack]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -189,40 +208,18 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
   }, [onClose, toggleLyrics]);
 
 
-  // Load liked state from localStorage
-  useEffect(() => {
-    const trackId = currentTrack?.id || (currentTrack as any)?.videoId;
-    if (!trackId) return;
-    try {
-      const stored = localStorage.getItem(`sway_liked_${trackId}`);
-      setIsLiked(stored === 'true');
-    } catch {
-      setIsLiked(false);
-    }
-  }, [currentTrack?.id, (currentTrack as any)?.videoId]);
-
   const toggleLike = useCallback(() => {
-    const trackId = currentTrack?.id || (currentTrack as any)?.videoId;
-    if (!trackId) return;
-    const next = !isLiked;
-    setIsLiked(next);
-    try {
-      localStorage.setItem(`sway_liked_${trackId}`, next ? 'true' : 'false');
-    } catch {}
-    sendTelemetry({
-      event_type: next ? 'like' : 'dislike',
-      track_id: trackId,
-      title: currentTrack?.title,
-      artist: currentTrack?.artist,
-    });
-  }, [currentTrack, isLiked]);
+    if (rawTrack) {
+      toggleTrackLike(rawTrack);
+    }
+  }, [rawTrack, toggleTrackLike]);
 
   // Fetch recommendations for Up Next drawer
+  const currentTrackId = currentTrack?.id || (currentTrack as any)?.videoId || '';
   useEffect(() => {
     if (!isDrawerOpen) return;
     setRecsLoading(true);
-    const trackId = currentTrack?.id || (currentTrack as any)?.videoId || '';
-    const url = `/api/proxy/recommendations?current_track_id=${encodeURIComponent(trackId)}&n=12`;
+    const url = `/api/proxy/recommendations?current_track_id=${encodeURIComponent(currentTrackId)}&n=12`;
     fetch(url)
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
@@ -230,7 +227,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       })
       .catch(() => setRecommendations([]))
       .finally(() => setRecsLoading(false));
-  }, [isDrawerOpen, currentTrack?.id, (currentTrack as any)?.videoId]);
+  }, [isDrawerOpen, currentTrackId]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -281,8 +278,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    handleClose, togglePlayPause, skipNext, skipPrev, seekTo,
-    duration, isMuted, setMuted, isDrawerOpen, currentTrack?.id, (currentTrack as any)?.videoId, lyricsSettings,
+    handleClose, togglePlayPause, toggleFullScreen, skipNext, skipPrev, seekTo,
+    duration, isMuted, setMuted, isDrawerOpen, currentTrackId, currentTrack, lyricsSettings,
   ]);
 
   // --- Lyrics state — lazily initialized from client cache for instant reopening ---
@@ -301,11 +298,6 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
     return cached?.status === 'NOT_FOUND';
   });
-  const [_lyricsProvider, setLyricsProvider] = useState<string>(() => {
-    if (!rawTrack) return '';
-    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
-    return cached?.provider ?? '';
-  });
   const [lyricsSyncQuality, setLyricsSyncQuality] = useState<string>(() => {
     if (!rawTrack) return 'LINE';
     const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
@@ -315,11 +307,6 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     if (!rawTrack) return null;
     const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
     return cached?.provenance ?? null;
-  });
-  const [_hasHindiScript, setHasHindiScript] = useState<boolean>(() => {
-    if (!rawTrack) return false;
-    const cached = getCachedLyrics(rawTrack.id, rawTrack.title, artistNames(rawTrack.artists, rawTrack.subtitle));
-    return cached?.hasHindiScript ?? false;
   });
 
   // --- User Manual Scroll & Touch Handling ---
@@ -359,8 +346,6 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     if (!currentTrack?.title) {
       setActiveLyrics([]);
       setLyricsError(false);
-      setLyricsProvider('');
-      setHasHindiScript(false);
       return;
     }
 
@@ -370,10 +355,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       setActiveLyrics(cached.lines);
       setLyricsLoading(false);
       setLyricsError(cached.status === 'NOT_FOUND');
-      setLyricsProvider(cached.provider);
       setLyricsSyncQuality(cached.syncQuality);
       setProvenance(cached.provenance);
-      setHasHindiScript(cached.hasHindiScript);
       return; // ← no network call, no spinner, instant
     }
 
@@ -382,9 +365,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     setLyricsLoading(true);
     setLyricsError(false);
     setActiveLyrics([]);
-    setLyricsProvider('');
     setLyricsSyncQuality('LINE');
-    setHasHindiScript(false);
     lastActiveIdx.current = -1;
     lastProcTime.current = 0;
     currentScrollY.current = 0;
@@ -401,7 +382,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     }
 
     const trackArtist = currentTrack.artist || currentTrack.subtitle || '';
-    const trackDuration = currentTrack.duration || duration || 0;
+    const trackDuration = currentTrack.duration > 0 ? currentTrack.duration : (duration > 0 ? duration : 0);
 
     fetchLyricsWithCache({
       songId: currentTrack.id,
@@ -414,10 +395,8 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
     })
       .then((entry) => {
         if (cancelled) return;
-        setLyricsProvider(entry.provider);
         setLyricsSyncQuality(entry.syncQuality);
         setProvenance(entry.provenance);
-        setHasHindiScript(entry.hasHindiScript);
 
         if (entry.status === 'NOT_FOUND' || entry.lines.length === 0) {
           setLyricsError(true);
@@ -431,7 +410,16 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       .finally(() => { if (!cancelled) setLyricsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.album, currentTrack?.duration]);
+  }, [
+    currentTrack?.id,
+    currentTrack?.title,
+    currentTrack?.artist,
+    currentTrack?.album,
+    currentTrack?.subtitle,
+    currentTrack?.lyricsId,
+    currentTrack?.duration,
+    duration,
+  ]);
 
   // ── Cache DOM element references once lyrics render ──
   useEffect(() => {
@@ -779,18 +767,12 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
       running = false;
       cancelAnimationFrame(rafId);
     };
-  }, [activeLyrics, isRich, lyricsSyncQuality, provenance, currentTrack?.id, (currentTrack as any)?.videoId]);
+  }, [activeLyrics, isRich, lyricsSyncQuality, provenance, currentTrackId, currentTrack, lyricsSettings]);
 
 
   if (!currentTrack) return null;
 
-  // Extract separate artist names
-  const artistList = currentTrack.artist
-    ? currentTrack.artist.split(/,\s*|\s*&\s*/).filter(Boolean)
-    : ['Unknown Artist'];
-
   // Dynamic palette from CSS custom properties (updated on root via colorExtractor)
-  const bgMain     = 'var(--art-bg-main, #0a0d13)';
   const pillBg     = 'var(--art-pill-bg, rgba(25, 30, 42, 0.65))';
   const pillActive = 'var(--art-pill-active, rgba(255,255,255,0.22))';
 
@@ -839,19 +821,52 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           className="flex flex-col items-center w-full"
         >
           <div className="flex items-center justify-center gap-3 w-full">
-            <h1
-              className={`title select-text truncate font-bold text-white tracking-tight ${
+            <Link
+              href={`/song/${encodeURIComponent(currentTrack.id)}`}
+              onClick={handleClose}
+              className={`title select-text truncate font-bold text-white hover:text-[--art-primary,#6366f1] hover:underline transition-colors tracking-tight cursor-pointer ${
                 isLarge ? 'text-[28px] max-w-[440px]' : 'text-[26px] max-w-[360px]'
               }`}
-              title={currentTrack.title}
+              title={`View song page: ${currentTrack.title}`}
             >
               {currentTrack.title}
-            </h1>
+            </Link>
             <button
+              type="button"
               onClick={toggleLike}
-              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors cursor-pointer"
+              title={isLiked ? 'Liked' : 'Like'}
             >
               <Heart size={20} className={isLiked ? 'fill-white text-white' : 'text-white/60'} />
+            </button>
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={downloadStatus === 'resolving' || downloadStatus === 'downloading'}
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+              title={
+                downloadStatus === 'complete'
+                  ? 'Downloaded!'
+                  : downloadStatus === 'resolving' || downloadStatus === 'downloading'
+                  ? 'Downloading...'
+                  : 'Download song (320kbps)'
+              }
+            >
+              {downloadStatus === 'resolving' || downloadStatus === 'downloading' ? (
+                <Loader2 size={18} className="animate-spin text-white" />
+              ) : downloadStatus === 'complete' ? (
+                <Check size={18} className="text-emerald-400" />
+              ) : (
+                <Download size={18} />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleCopySongLink}
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+              title={copiedLink ? 'Song link copied!' : 'Copy song link'}
+            >
+              {copiedLink ? <Check size={18} className="text-emerald-400" /> : <Share2 size={18} />}
             </button>
           </div>
           <p
@@ -859,8 +874,37 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
               isLarge ? 'text-[15px] max-w-[440px]' : 'text-[15px] max-w-[360px]'
             }`}
           >
-            {currentTrack.artist}{currentTrack.album ? ` - ${currentTrack.album}` : ''}
+            {rawTrack?.artists && rawTrack.artists.length > 0 && rawTrack.artists[0]?.id ? (
+              <Link
+                href={`/artist/${encodeURIComponent(rawTrack.artists[0].id)}`}
+                onClick={handleClose}
+                className="hover:text-white hover:underline transition-colors"
+              >
+                {currentTrack.artist}
+              </Link>
+            ) : (
+              <span>{currentTrack.artist}</span>
+            )}
+            {rawTrack?.album_id ? (
+              <>
+                {' - '}
+                <Link
+                  href={`/album/${encodeURIComponent(rawTrack.album_id)}`}
+                  onClick={handleClose}
+                  className="hover:text-white hover:underline transition-colors"
+                >
+                  {rawTrack.album || currentTrack.album}
+                </Link>
+              </>
+            ) : (
+              currentTrack.album && currentTrack.album !== 'YouTube Music' ? ` - ${currentTrack.album}` : ''
+            )}
           </p>
+          {copiedLink && (
+            <span className="text-[11px] font-mono text-emerald-300 bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/30 mt-1">
+              Song link copied to clipboard
+            </span>
+          )}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -977,8 +1021,31 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
         </button>
       </div>
 
-      {/* Right: Heart & Lyric Quote */}
+      {/* Right: Heart, Download & Lyric Quote */}
       <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={handleDownload}
+          disabled={downloadStatus === 'resolving' || downloadStatus === 'downloading'}
+          aria-label="Download song"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer"
+          title={
+            downloadStatus === 'complete'
+              ? 'Downloaded!'
+              : downloadStatus === 'resolving' || downloadStatus === 'downloading'
+              ? 'Downloading...'
+              : 'Download song (320kbps)'
+          }
+        >
+          {downloadStatus === 'resolving' || downloadStatus === 'downloading' ? (
+            <Loader2 size={16} className="animate-spin text-white" />
+          ) : downloadStatus === 'complete' ? (
+            <Check size={16} className="text-emerald-400" />
+          ) : (
+            <Download size={16} />
+          )}
+        </button>
+
         <button
           type="button"
           onClick={toggleLike}
@@ -1036,6 +1103,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           <button
             type="button"
             onClick={() => lyricsSettings.setStageMode('apple')}
+            aria-label="Apple mode (split lyrics and artwork)"
             className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
               stageMode === 'apple'
                 ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
@@ -1049,6 +1117,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           <button
             type="button"
             onClick={() => lyricsSettings.setStageMode('vinyl')}
+            aria-label="Vinyl mode (immersive vinyl artwork)"
             className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
               stageMode === 'vinyl'
                 ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
@@ -1062,6 +1131,7 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           <button
             type="button"
             onClick={() => lyricsSettings.setStageMode('cinema')}
+            aria-label="Cinema mode (focused sing view)"
             className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
               stageMode === 'cinema'
                 ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/30'
@@ -1073,6 +1143,28 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
             <span>Cinema</span>
           </button>
         </div>
+
+        {/* 1-Click Script Switcher (Aa Romanized / Original) */}
+        <button
+          type="button"
+          onClick={() => lyricsSettings.setShowRomanized(!lyricsSettings.showRomanized)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all cursor-pointer shadow-sm ${
+            lyricsSettings.showRomanized
+              ? 'bg-white/20 border-white/35 text-white ring-1 ring-white/30'
+              : 'bg-black/30 border-white/10 text-white/50 hover:text-white hover:bg-white/10'
+          }`}
+          title={
+            lyricsSettings.showRomanized
+              ? 'Romanized (English letters) active · Click for Original Script'
+              : 'Original Script active · Click for Romanized (English letters)'
+          }
+          aria-label="Toggle Romanized lyrics"
+        >
+          <span className="font-bold tracking-tight text-[12px] font-mono">Aa</span>
+          <span className="hidden xl:inline text-[11px]">
+            {lyricsSettings.showRomanized ? 'Roman' : 'Script'}
+          </span>
+        </button>
 
         {/* Direct Settings Link */}
         <Link
@@ -1160,8 +1252,21 @@ export function FullScreenLyrics({ onClose }: { onClose?: () => void }) {
           </button>
         </div>
 
-        {/* Right: Settings & Up Next */}
+        {/* Right: Script, Settings & Up Next */}
         <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => lyricsSettings.setShowRomanized(!lyricsSettings.showRomanized)}
+            className={`w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-xl border text-xs font-bold font-mono shadow-md active:scale-95 transition-all cursor-pointer ${
+              lyricsSettings.showRomanized
+                ? 'bg-white/25 border-white/35 text-white ring-1 ring-white/30'
+                : 'bg-black/40 border-white/15 text-white/60 hover:text-white'
+            }`}
+            title={lyricsSettings.showRomanized ? 'Romanized Active · Tap for Original' : 'Original Script · Tap to Romanize'}
+            aria-label="Toggle Romanized lyrics"
+          >
+            Aa
+          </button>
           <Link
             href="/settings"
             onClick={handleClose}

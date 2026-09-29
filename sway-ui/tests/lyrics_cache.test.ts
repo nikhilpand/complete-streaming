@@ -19,8 +19,8 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
   });
 
   test('CACHE_VERSION and CLIENT_ENGINE_VERSION are correctly configured', () => {
-    assert.equal(CLIENT_ENGINE_VERSION, 'v4');
-    assert.equal(CACHE_VERSION, 'lyrics-v4');
+    assert.equal(CLIENT_ENGINE_VERSION, 'v6');
+    assert.equal(CACHE_VERSION, 'lyrics-v6');
   });
 
   test('synced lyrics are strictly recording-keyed and do NOT leak across different tracks with same title/artist', () => {
@@ -212,7 +212,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
       return {
         ok: true,
         status: 200,
-        headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+        headers: new Headers({ 'x-lyrics-engine-version': CLIENT_ENGINE_VERSION }),
         json: async () => ({
           status: 'FOUND',
           lines: [{ startMs: 1000, endMs: 3000, text: 'Concurrent line' }],
@@ -439,7 +439,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
       status: 'FOUND',
       cachedAt: Date.now(),
       expiresAt: Date.now() + 100000,
-      engineVersion: 'v4',
+      engineVersion: CLIENT_ENGINE_VERSION,
       synced: true,
       hasWordTiming: true,
     };
@@ -449,7 +449,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
     const hit = getCachedLyrics('recording_b');
     assert.ok(hit, 'Matching engine version must result in cache hit');
     assert.equal(hit?.recordingKey, 'recording_b');
-    assert.equal(hit?.engineVersion, 'v4');
+    assert.equal(hit?.engineVersion, CLIENT_ENGINE_VERSION);
   });
 
   test('lyricsId is never used as recordingKey', async () => {
@@ -457,7 +457,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
     (globalThis as any).fetch = async () => ({
       ok: true,
       status: 200,
-      headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+      headers: new Headers({ 'x-lyrics-engine-version': CLIENT_ENGINE_VERSION }),
       json: async () => ({
         status: 'FOUND',
         provider: 'jiosaavn',
@@ -501,7 +501,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
       status: 'FOUND',
       cachedAt: Date.now(),
       expiresAt: Date.now() + 100000,
-      engineVersion: 'v4',
+      engineVersion: CLIENT_ENGINE_VERSION,
       synced: true,
     };
 
@@ -534,7 +534,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
       return {
         ok: true,
         status: 200,
-        headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+        headers: new Headers({ 'x-lyrics-engine-version': CLIENT_ENGINE_VERSION }),
         json: async () => ({
           status: 'FOUND',
           identity: { recordingKey: 'rec_inflight_test' },
@@ -576,7 +576,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
       return {
         ok: true,
         status: 200,
-        headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+        headers: new Headers({ 'x-lyrics-engine-version': CLIENT_ENGINE_VERSION }),
         json: async () => ({
           status: 'FOUND',
           identity: { recordingKey: 'rec_zero_confidence' },
@@ -698,7 +698,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
         return {
           ok: true,
           status: 200,
-          headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+          headers: new Headers({ 'x-lyrics-engine-version': CLIENT_ENGINE_VERSION }),
           json: async () => ({
             status: 'FOUND',
             identity: { recordingKey: 'rec_old_req' },
@@ -712,7 +712,7 @@ describe('Authoritative Client Lyrics Cache & Recording Identity Invariants', ()
       return {
         ok: true,
         status: 200,
-        headers: new Headers({ 'x-lyrics-engine-version': 'v4' }),
+        headers: new Headers({ 'x-lyrics-engine-version': CLIENT_ENGINE_VERSION }),
         json: async () => ({
           status: 'FOUND',
           identity: { recordingKey: 'rec_new_req' },

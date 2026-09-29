@@ -65,6 +65,7 @@ export interface TelemetryEvent {
     | 'skip_lt_10s'
     | 'skip_10_30s'
     | 'like'
+    | 'unlike'
     | 'dislike'
     | 'replay'
     | 'search';

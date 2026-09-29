@@ -1,12 +1,13 @@
 'use client';
 import { useCallback, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ListMusic, Music2, Sparkles, Plus } from 'lucide-react';
+import { X, ListMusic, Sparkles, Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
 import { Artwork } from '@/components/artwork/Artwork';
 import { artistNames, formatMs, cn } from '@/lib/utils';
 import { getNextQueue, queueTrackToSong } from '@/lib/api/queue';
 import type { QueueTrack } from '@/lib/api/types';
+import { useOverlayHistory } from '@/lib/hooks/useOverlayHistory';
 
 export function QueuePanel() {
   const isOpen = usePlayerStore((s) => s.isQueueOpen);
@@ -14,6 +15,11 @@ export function QueuePanel() {
   const queueIndex = usePlayerStore((s) => s.queueIndex);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const toggleQueue = usePlayerStore((s) => s.toggleQueue);
+  const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
+  const clearQueue = usePlayerStore((s) => s.clearQueue);
+  const moveQueueItem = usePlayerStore((s) => s.moveQueueItem);
+
+  useOverlayHistory(isOpen, () => usePlayerStore.setState({ isQueueOpen: false }), 'queue');
 
   const [autoplayTracks, setAutoplayTracks] = useState<QueueTrack[]>([]);
   const [loadingAutoplay, setLoadingAutoplay] = useState(false);
@@ -86,13 +92,24 @@ export function QueuePanel() {
                   </span>
                 )}
               </div>
-              <button
-                onClick={toggleQueue}
-                className="w-7 h-7 flex items-center justify-center rounded-md text-[--muted] hover:text-[--foreground] hover:bg-white/[0.08] transition-colors cursor-pointer"
-                aria-label="Close queue"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                {queue.slice(queueIndex + 1).length > 0 && (
+                  <button
+                    onClick={() => clearQueue()}
+                    className="text-[11px] font-medium text-[--muted] hover:text-red-400 transition-colors px-2 py-0.5 rounded hover:bg-white/[0.05] cursor-pointer"
+                    title="Clear upcoming tracks"
+                  >
+                    Clear Up Next
+                  </button>
+                )}
+                <button
+                  onClick={toggleQueue}
+                  className="w-7 h-7 flex items-center justify-center rounded-md text-[--muted] hover:text-[--foreground] hover:bg-white/[0.08] transition-colors cursor-pointer"
+                  aria-label="Close queue"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Queue list */}
@@ -116,18 +133,30 @@ export function QueuePanel() {
                   {/* Up next */}
                   {queue.slice(queueIndex + 1).length > 0 && (
                     <div className="px-4 mt-4">
-                      <p className="text-[10px] font-mono text-[--muted] uppercase tracking-widest mb-2 px-1">Up Next</p>
-                      {queue.slice(queueIndex + 1).map((song, offset) => {
-                        const actualIndex = queueIndex + 1 + offset;
-                        return (
-                          <QueueRow
-                            key={`${song.id}-${actualIndex}`}
-                            song={song}
-                            isActive={false}
-                            onClick={() => playAt(actualIndex)}
-                          />
-                        );
-                      })}
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <p className="text-[10px] font-mono text-[--muted] uppercase tracking-widest">Up Next</p>
+                        <span className="text-[10px] text-[--muted]">{queue.length - 1 - queueIndex} tracks</span>
+                      </div>
+                      <div className="space-y-1">
+                        {queue.slice(queueIndex + 1).map((song, offset) => {
+                          const actualIndex = queueIndex + 1 + offset;
+                          return (
+                            <QueueRow
+                              key={`${song.id}-${actualIndex}`}
+                              song={song}
+                              isActive={false}
+                              onClick={() => playAt(actualIndex)}
+                              onRemove={() => removeFromQueue(actualIndex)}
+                              onMoveUp={offset > 0 ? () => moveQueueItem(actualIndex, actualIndex - 1) : undefined}
+                              onMoveDown={
+                                actualIndex < queue.length - 1
+                                  ? () => moveQueueItem(actualIndex, actualIndex + 1)
+                                  : undefined
+                              }
+                            />
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
@@ -141,7 +170,9 @@ export function QueuePanel() {
                             Autoplay Next
                           </p>
                         </div>
-                        <span className="text-[9px] font-mono text-[--muted] uppercase tracking-wider">AI Sequenced</span>
+                        <span className="text-[9px] font-mono text-[--muted] uppercase tracking-wider">
+                          {loadingAutoplay ? 'Discovering...' : 'AI Sequenced'}
+                        </span>
                       </div>
                       <div className="space-y-1">
                         {autoplayTracks.map((track) => (
@@ -156,6 +187,7 @@ export function QueuePanel() {
                                 usePlayerStore.getState().setQueue(updated, updated.length - 1);
                                 usePlayerStore.getState().setCurrentTrack(song);
                               }}
+                              aria-label={`Play ${track.title} now`}
                               className="flex items-center gap-2.5 flex-1 min-w-0 text-left cursor-pointer"
                             >
                               <div className="w-8 h-8 rounded-[--radius-xs] overflow-hidden flex-shrink-0 bg-white/[0.07]">
@@ -177,6 +209,7 @@ export function QueuePanel() {
                                 usePlayerStore.getState().addToQueue(song);
                                 setAutoplayTracks((prev) => prev.filter((t) => t.id !== track.id));
                               }}
+                              aria-label={`Add ${track.title} to queue`}
                               title="Add to queue"
                               className="p-1 text-[--muted] hover:text-[--foreground] opacity-60 group-hover/auto:opacity-100 transition cursor-pointer"
                             >
@@ -218,17 +251,27 @@ function QueueRow({
   isActive,
   isDimmed = false,
   onClick,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
 }: {
   song: { id: string; title: string; artists?: Array<{ name: string }>; artwork_url?: string; subtitle?: string; duration_ms?: number };
   isActive: boolean;
   isDimmed?: boolean;
   onClick: () => void;
+  onRemove?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   return (
-    <button
+    <div
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      aria-label={`Play ${song.title}`}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick()}
       className={cn(
-        'flex items-center gap-3 w-full px-2 py-2 rounded-[--radius-sm] group text-left transition-colors cursor-pointer',
+        'group flex items-center gap-2.5 w-full px-2 py-2 rounded-[--radius-sm] text-left transition-colors cursor-pointer select-none',
         isActive
           ? 'bg-[--art-primary]/15 hover:bg-[--art-primary]/20'
           : 'hover:bg-white/[0.06]',
@@ -266,12 +309,61 @@ function QueueRow({
         </p>
       </div>
 
-      {/* Duration */}
-      {song.duration_ms && (
-        <span className="text-[11px] font-mono text-[--muted] flex-shrink-0">
-          {formatMs(song.duration_ms)}
-        </span>
-      )}
-    </button>
+      {/* Duration & Hover Actions */}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {song.duration_ms && (
+          <span className={cn('text-[11px] font-mono text-[--muted]', (onMoveUp || onMoveDown || onRemove) && 'group-hover:hidden')}>
+            {formatMs(song.duration_ms)}
+          </span>
+        )}
+
+        {(onMoveUp || onMoveDown || onRemove) && (
+          <div className="hidden group-hover:flex items-center gap-0.5">
+            {onMoveUp && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveUp();
+                }}
+                className="p-1 rounded text-[--muted] hover:text-[--foreground] hover:bg-white/[0.1] transition-colors cursor-pointer"
+                title="Move up"
+                aria-label="Move up"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {onMoveDown && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveDown();
+                }}
+                className="p-1 rounded text-[--muted] hover:text-[--foreground] hover:bg-white/[0.1] transition-colors cursor-pointer"
+                title="Move down"
+                aria-label="Move down"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {onRemove && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+                className="p-1 rounded text-[--muted] hover:text-red-400 hover:bg-white/[0.1] transition-colors cursor-pointer"
+                title="Remove from queue"
+                aria-label="Remove from queue"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

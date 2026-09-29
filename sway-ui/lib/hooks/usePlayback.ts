@@ -3,11 +3,13 @@
 import { useEffect, useRef } from 'react';
 import { usePlayerStore } from '@/store/playerStore';
 import { audioManager } from '@/lib/audio/AudioManager';
-import { resolveMedia } from '@/lib/api/songs';
+import { resolveMedia, prefetchMedia } from '@/lib/api/songs';
 import { sendTelemetry } from '@/lib/api/telemetry';
 import { scheduleExtract, applyPalette } from '@/lib/color/colorExtractor';
 import { artistNames, artUrl } from '@/lib/utils';
 import { prefetchLyrics } from '@/lib/lyricsCache';
+import { useRecentHistory } from '@/store/useRecentHistory';
+import { scrobbleTrack } from '@/lib/scrobbler';
 import type { Song } from '@/lib/api/types';
 
 function getTrackMeta(t: Song | null) {
@@ -35,6 +37,7 @@ export function usePlayback() {
   const durationRef = useRef<number>(0);
   const activeTrackRef = useRef<Song | null>(null);
   const activeContextRef = useRef<{ source?: string; query?: string } | null>(null);
+  const nextTrackPrefetchedRef = useRef<string | null>(null);
 
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const playbackContext = usePlayerStore((s) => s.playbackContext);
@@ -61,17 +64,20 @@ export function usePlayback() {
         case 'play':
           setStatus('playing');
           const pTrack = activeTrackRef.current;
-          if (pTrack && !milestonesFiredRef.current.play_started) {
-            milestonesFiredRef.current.play_started = true;
-            sendTelemetry({
-              event_type: 'play_started',
-              track_id: pTrack.id,
-              ...getTrackMeta(pTrack),
-              position_ms: Math.round(audioManager.currentTime * 1000) || 0,
-              duration_ms: Math.round((audioManager.duration || 0) * 1000) || pTrack.duration_ms,
-              source: activeContextRef.current?.source,
-              query: activeContextRef.current?.query,
-            });
+          if (pTrack) {
+            useRecentHistory.getState().addHistory(pTrack);
+            if (!milestonesFiredRef.current.play_started) {
+              milestonesFiredRef.current.play_started = true;
+              sendTelemetry({
+                event_type: 'play_started',
+                track_id: pTrack.id,
+                ...getTrackMeta(pTrack),
+                position_ms: Math.round(audioManager.currentTime * 1000) || 0,
+                duration_ms: Math.round((audioManager.duration || 0) * 1000) || pTrack.duration_ms,
+                source: activeContextRef.current?.source,
+                query: activeContextRef.current?.query,
+              });
+            }
           }
           break;
         case 'pause':
@@ -95,6 +101,19 @@ export function usePlayback() {
           // Milestone Telemetry
           const track = activeTrackRef.current;
           if (track) {
+            // Prefetch upcoming track media and lyrics once current song playback stabilizes
+            if (ev.currentTime >= 5 && !milestonesFiredRef.current.prefetch_next) {
+              milestonesFiredRef.current.prefetch_next = true;
+              const { queue, queueIndex } = usePlayerStore.getState();
+              const nextSong = queue[queueIndex + 1];
+              if (nextSong) {
+                prefetchMedia(nextSong.id, {
+                  title: nextSong.title,
+                  artist: artistNames(nextSong.artists, nextSong.subtitle),
+                });
+                prefetchLyrics(nextSong);
+              }
+            }
             if (ev.currentTime >= 10 && !milestonesFiredRef.current.play_10s) {
               milestonesFiredRef.current.play_10s = true;
               sendTelemetry({
@@ -135,6 +154,34 @@ export function usePlayback() {
                 source: activeContextRef.current?.source,
                 query: activeContextRef.current?.query,
               });
+              scrobbleTrack(track, Math.floor(Date.now() / 1000) - Math.floor(ev.currentTime));
+            }
+          }
+
+          // Pre-resolve next track 15s before track end for zero-latency gapless / crossfade transition
+          if (
+            ev.duration > 20 &&
+            ev.duration - ev.currentTime <= 15 &&
+            nextTrackPrefetchedRef.current !== track?.id
+          ) {
+            nextTrackPrefetchedRef.current = track?.id || null;
+            const { queue, queueIndex, isShuffled, shuffleOrder, repeatMode } = usePlayerStore.getState();
+            let nextIndex = -1;
+            if (isShuffled && shuffleOrder && shuffleOrder.length === queue.length) {
+              const currentPos = shuffleOrder.indexOf(queueIndex);
+              if (currentPos >= 0 && currentPos + 1 < shuffleOrder.length) {
+                nextIndex = shuffleOrder[currentPos + 1];
+              }
+            } else if (queueIndex + 1 < queue.length) {
+              nextIndex = queueIndex + 1;
+            } else if (repeatMode === 'all') {
+              nextIndex = 0;
+            }
+
+            if (nextIndex >= 0 && queue[nextIndex]) {
+              const nextTrack = queue[nextIndex];
+              prefetchMedia(nextTrack.id);
+              prefetchLyrics(nextTrack);
             }
           }
 
@@ -143,6 +190,23 @@ export function usePlayback() {
             lastStoreTime.current = ev.currentTime;
             setCurrentTime(ev.currentTime);
             setDuration(ev.duration);
+
+            // Sync OS lockscreen / MediaSession position state
+            if (
+              typeof window !== 'undefined' &&
+              'mediaSession' in navigator &&
+              'setPositionState' in navigator.mediaSession &&
+              ev.duration > 0 &&
+              ev.currentTime <= ev.duration
+            ) {
+              try {
+                navigator.mediaSession.setPositionState({
+                  duration: Math.max(0, ev.duration),
+                  playbackRate: 1,
+                  position: Math.min(Math.max(0, ev.currentTime), ev.duration),
+                });
+              } catch {}
+            }
           }
           break;
         case 'ended':
@@ -181,8 +245,12 @@ export function usePlayback() {
           if (retryCountRef.current < 1) {
             retryCountRef.current += 1;
             const resumePos = audioManager.currentTime;
+            const retryMeta = {
+              title: storeTrack.title,
+              artist: artistNames(storeTrack.artists, storeTrack.subtitle),
+            };
             setStatus('loading');
-            resolveMedia(storeTrack.id)
+            resolveMedia(storeTrack.id, undefined, retryMeta)
               .then(async (media) => {
                 if (playbackGenRef.current !== curGen || usePlayerStore.getState().currentTrack?.id !== storeTrack.id) {
                   return;
@@ -205,7 +273,7 @@ export function usePlayback() {
           break;
       }
     });
-  }, [setStatus, setCurrentTime, setDuration, setVolume, setMuted, setError, playNext]);
+  }, [setStatus, setCurrentTime, setBufferedTime, setDuration, setVolume, setMuted, setError, playNext]);
 
   // ── 2. MediaSession Projection (OS lock screen, Bluetooth, hardware keys) ──
   useEffect(() => {
@@ -262,6 +330,17 @@ export function usePlayback() {
           store().seekTo(details.seekTime);
         }
       });
+      ms.setActionHandler('seekbackward', (details) => {
+        const skip = details.seekOffset || 10;
+        const cur = audioManager?.currentTime ?? store().currentTime;
+        store().seekTo(Math.max(0, cur - skip));
+      });
+      ms.setActionHandler('seekforward', (details) => {
+        const skip = details.seekOffset || 10;
+        const cur = audioManager?.currentTime ?? store().currentTime;
+        const dur = audioManager?.duration ?? store().duration;
+        store().seekTo(Math.min(dur || 9999, cur + skip));
+      });
     } catch {
       // Browser compatibility
     }
@@ -273,6 +352,8 @@ export function usePlayback() {
         ms.setActionHandler('previoustrack', null);
         ms.setActionHandler('nexttrack', null);
         ms.setActionHandler('seekto', null);
+        ms.setActionHandler('seekbackward', null);
+        ms.setActionHandler('seekforward', null);
       } catch {}
     };
   }, []);
@@ -332,11 +413,29 @@ export function usePlayback() {
 
     // Background lyrics prefetch — so opening lyrics panel is instant (0ms, no spinner)
     prefetchLyrics(currentTrack);
+    nextTrackPrefetchedRef.current = null;
 
-    const attemptLoad = (isRetry = false) => {
-      if (ac.signal.aborted || playbackGenRef.current !== generation) return;
+    const attemptLoad = async (isRetry = false) => {
+      // 1. Check local offline audio cache (IndexedDB) first for instant offline/0ms playback
+      try {
+        const { getCachedAudio } = await import('@/lib/audioCache');
+        const cached = await getCachedAudio(currentTrack.id);
+        if (cached?.objectUrl) {
+          if (ac.signal.aborted || playbackGenRef.current !== generation) return;
+          await audioManager.load(cached.objectUrl);
+          if (ac.signal.aborted || playbackGenRef.current !== generation) return;
+          await audioManager.play();
+          return;
+        }
+      } catch {}
 
-      resolveMedia(currentTrack.id, ac.signal)
+      // 2. Network media resolution
+      const trackMeta = {
+        title: currentTrack.title,
+        artist: artistNames(currentTrack.artists, currentTrack.subtitle),
+      };
+
+      resolveMedia(currentTrack.id, ac.signal, trackMeta)
         .then(async (media) => {
           if (ac.signal.aborted || playbackGenRef.current !== generation) return;
           if (!media?.streams?.length) {
@@ -354,6 +453,17 @@ export function usePlayback() {
             await audioManager.load(best.url);
             if (ac.signal.aborted || playbackGenRef.current !== generation) return;
             await audioManager.play();
+
+            // Background populate cache for fast repeat plays
+            import('@/lib/audioCache').then(async ({ cacheAudio, isAudioCached }) => {
+              const alreadyCached = await isAudioCached(currentTrack.id);
+              if (!alreadyCached && best.url) {
+                fetch(best.url)
+                  .then((res) => res.blob())
+                  .then((blob) => cacheAudio(currentTrack.id, blob, best.mime_type || 'audio/mp4'))
+                  .catch(() => {});
+              }
+            }).catch(() => {});
           } catch (err: unknown) {
             if (ac.signal.aborted || playbackGenRef.current !== generation) return;
             const e = err as Error;

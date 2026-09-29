@@ -1,77 +1,16 @@
-"""
-SWAY Queue Router — Sequence-Optimized Next Queue
-Optimizes continuous playback transitions (A -> B -> C)
-avoiding abrupt mood or tempo/energy cliffs.
-"""
-
+"""SWAY Queue Router — Sequence-Optimized Next Queue backed by recsys."""
 from __future__ import annotations
 
-import asyncio
 import logging
-import sys
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Header, Query, Request
 
-# Ensure sway_taste_engine is importable
-repo_root = Path(__file__).resolve().parents[3]
-taste_engine_dir = repo_root / "sway_taste_engine"
-if str(taste_engine_dir) not in sys.path:
-    sys.path.insert(0, str(taste_engine_dir))
-
-from app.models import APIResponse, Song
-from app.routers import songs as songs_router
-from app.routers.recommendations import get_taste_engine, song_to_engine_track
-from app.services.candidate_builder import CandidateBuilder
-from sway_taste_engine.config import QueueWeights
-from sway_taste_engine.metadata import clean_track_id, extract_track_features
-from sway_taste_engine.models import Track, UserTasteProfile
-from sway_taste_engine.queue_planner import QueuePlanner
+from app.models import APIResponse
+from app.recsys import hash_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/queue", tags=["queue"])
-
-
-async def _resolve_song(request: Request, song_id: str) -> Optional[Song]:
-    clean_id = clean_track_id(song_id) if song_id else ""
-    # Check monkeypatched or helper in songs router
-    if hasattr(songs_router, "get_song_by_id"):
-        fn = getattr(songs_router, "get_song_by_id")
-        for test_id in [clean_id, song_id]:
-            if not test_id:
-                continue
-            try:
-                res = fn(test_id)
-                if asyncio.iscoroutine(res):
-                    res = await res
-                if res:
-                    return res
-            except TypeError:
-                try:
-                    provider = getattr(request.app.state, "provider", None)
-                    res = fn(test_id, provider=provider)
-                    if asyncio.iscoroutine(res):
-                        res = await res
-                    if res:
-                        return res
-                except Exception:
-                    pass
-            except Exception:
-                pass
-
-    provider = getattr(request.app.state, "provider", None)
-    if provider:
-        for test_id in [clean_id, song_id]:
-            if not test_id:
-                continue
-            try:
-                res = await provider.get_song(test_id)
-                if res:
-                    return res
-            except Exception:
-                pass
-    return None
 
 
 @router.get("/next", response_model=APIResponse, summary="Get sequence-optimized next queue")
@@ -80,111 +19,56 @@ async def get_next_queue(
     current_track_id: str = Query(..., description="ID of the currently playing track"),
     count: int = Query(10, ge=1, le=50, description="Number of next tracks to sequence"),
     user_id: Optional[str] = Query(None, description="Explicit user or session identifier"),
+    session_id: Optional[str] = Query(None, description="Session ID"),
+    x_sway_user_id: Optional[str] = Header(None),
 ):
-    """
-    Produce smooth continuation queue (A -> B -> C) matching energy and mood
-    while avoiding abrupt genre and tempo cliffs.
-    """
-    effective_user_id = (
-        user_id
-        or request.headers.get("x-sway-user-id")
-        or request.headers.get("x-sway-anon-id")
-        or "anon-default"
-    )
+    recs = getattr(request.app.state, "recs", None)
+    if not recs:
+        return APIResponse(success=True, data={"current_track_id": current_track_id, "queue": [], "count": 0})
 
-    engine = get_taste_engine()
-    profile = engine.store.get_profile(effective_user_id)
-
-    curr_song = await _resolve_song(request, current_track_id)
-    if curr_song:
-        current_track = song_to_engine_track(curr_song)
-    else:
-        # Check store
-        stored = engine.store.get_track(current_track_id)
-        if stored:
-            current_track = stored
-        else:
-            current_track = Track(
-                id=current_track_id,
-                title=current_track_id,
-                artist_id="unknown",
-                artist_name="Unknown Artist",
-            )
-
-    candidates: List[Track] = []
-    provider = getattr(request.app.state, "provider", None)
-
-    # 1. Hydrate candidate pool using CandidateBuilder if provider is available
-    if provider and curr_song:
-        try:
-            builder = CandidateBuilder(provider, taste_store=engine.store)
-            retrieved_tracks, _ = await builder.build_candidates(curr_song, profile=profile)
-            candidates.extend(retrieved_tracks)
-        except Exception as e:
-            logger.warning("Failed to build candidates with CandidateBuilder: %s", e)
-
-    # 2. Fallback or augment with all catalog tracks in taste_store
-    if len(candidates) < 15:
-        all_catalog = engine.store.all_tracks()
-        for t in all_catalog:
-            if t.id != current_track.id and t.id not in {c.id for c in candidates}:
-                candidates.append(t)
-
-    planner = QueuePlanner()
-    ranked_tracks = planner.plan_next(
-        current_track=current_track,
-        candidates=candidates,
-        profile=profile,
-        store=engine.store,
-        count=count,
-    )
-
-    queue_data = []
-    for t in ranked_tracks:
-        prov = getattr(t, "provider", None)
-        p_id = getattr(t, "provider_id", None)
-        if not prov or not p_id:
-            if ":" in t.id:
-                prov, p_id = t.id.split(":", 1)
-            else:
-                prov = "saavn"
-                p_id = t.id
-        full_id = f"{prov}:{p_id}" if prov == "youtube" and not t.id.startswith(("youtube:", "yt:")) else t.id
-        has_media = getattr(t, "has_media", None)
-        if has_media is None:
-            if isinstance(getattr(t, "provider_available", None), dict) and prov in t.provider_available:
-                has_media = t.provider_available[prov]
-            else:
-                has_media = True
-
-        queue_data.append(
-            {
+    uid = user_id or x_sway_user_id
+    effective_user = hash_user(uid, recs.s.user_salt) if (recs.s.user_salt and uid) else None
+    try:
+        res = await recs.next_songs(
+            session_id=session_id,
+            current_track_id=current_track_id,
+            count=count,
+            user=effective_user,
+        )
+        tracks = res.get("tracks", [])
+        queue_data = []
+        for t in tracks:
+            sid = t.get("saavn_id") or t.get("id") or ""
+            vid = t.get("ytm_video_id") or ""
+            prov = "saavn" if sid and not sid.startswith("youtube:") else "youtube"
+            pid = sid if prov == "saavn" else vid
+            full_id = sid or (f"youtube:{vid}" if vid else "")
+            artists = t.get("artists") or []
+            artist_name = t.get("artist") or (", ".join(artists) if artists else "Unknown")
+            queue_data.append({
                 "id": full_id,
                 "provider": prov,
-                "provider_id": p_id,
-                "title": t.title,
-                "artist_name": t.artist_name,
-                "artists": (
-                    [{"id": a.id, "name": a.name, "role": a.role, "image_url": a.image_url} for a in t.artists]
-                    if t.artists
-                    else [{"id": t.artist_id, "name": t.artist_name, "role": "primary"}]
-                ),
-                "album": t.album,
-                "year": t.year,
-                "language": t.language,
-                "artwork_url": t.artwork_url,
-                "has_media": has_media,
-                "energy": t.energy,
-                "popularity": t.popularity,
-            }
+                "provider_id": pid,
+                "title": t.get("title", ""),
+                "artist_name": artist_name,
+                "artists": [{"id": "", "name": a, "role": "primary"} for a in artists],
+                "album": t.get("album", ""),
+                "year": t.get("year", ""),
+                "language": t.get("language", ""),
+                "artwork_url": t.get("image", ""),
+                "has_media": t.get("playback") == "saavn",
+                "energy": 0.5,
+                "popularity": 0.5,
+            })
+        return APIResponse(
+            success=True,
+            data={
+                "current_track_id": current_track_id,
+                "session_id": res.get("session_id"),
+                "queue": queue_data,
+                "count": len(queue_data),
+            },
         )
-
-
-    return APIResponse(
-        success=True,
-        data={
-            "current_track_id": current_track_id,
-            "queue": queue_data,
-            "count": len(queue_data),
-        },
-    )
+    except Exception as e:
+        logger.warning("queue next failed: %s", e)
+        return APIResponse(success=True, data={"current_track_id": current_track_id, "queue": [], "count": 0})

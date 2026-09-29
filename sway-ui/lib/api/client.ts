@@ -1,7 +1,9 @@
 import type { ApiResponse } from './types';
 
 const isServer = typeof window === 'undefined';
-const API_BASE = isServer ? (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000') + '/api/v1' : '/api/proxy';
+const API_BASE = isServer
+  ? (process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '') + '/api/v1'
+  : '/api/proxy';
 
 export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;

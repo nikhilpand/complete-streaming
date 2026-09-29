@@ -55,6 +55,25 @@ class Settings(BaseSettings):
             "www.saavn.com",
         }
     )
+    SPOTIFY_ALLOWED_HOSTS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "open.spotify.com",
+            "spotify.com",
+            "spotify.link",
+        }
+    )
+    YOUTUBE_ALLOWED_HOSTS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "music.youtube.com",
+            "www.youtube.com",
+            "youtube.com",
+            "youtu.be",
+        }
+    )
+
+    # Optional Spotify API credentials (keyless embed scraper used when empty)
+    SPOTIFY_CLIENT_ID: str = ""
+    SPOTIFY_CLIENT_SECRET: str = ""
 
     # ── HTTP client ──────────────────────────────────────
     HTTP_CONNECT_TIMEOUT: float = 5.0

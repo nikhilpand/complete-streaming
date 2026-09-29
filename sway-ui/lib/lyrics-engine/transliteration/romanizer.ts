@@ -2,6 +2,7 @@
  * romanizer.ts
  * Natural Hindi Devanagari to Roman (Hinglish) Transliterator (Section 24 & 25)
  * Combines ISO 15919 baseline with natural song phonetic rules and schwa deletion.
+ * ZERO HARDCODED VOCABULARY.
  */
 
 const VOWELS: Record<string, string> = {
@@ -10,7 +11,7 @@ const VOWELS: Record<string, string> = {
 };
 
 const MATRAS: Record<string, string> = {
-  'ा': 'a', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo', 'ृ': 'ri',
+  'ा': 'aa', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo', 'ृ': 'ri',
   'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au',
 };
 
@@ -19,7 +20,7 @@ const CONSONANTS: Record<string, string> = {
   'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
   'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n',
   'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n',
-  'प': 'p', 'फ': 'ph', 'ब': 'b', 'भ': 'bh', 'म': 'm',
+  'प': 'p', 'फ': 'ph', 'ब': 'b', 'bh': 'bh', 'भ': 'bh', 'म': 'm',
   'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v',
   'श': 'sh', 'ष': 'sh', 'स': 's', 'ह': 'h',
   // Nukta consonants
@@ -56,7 +57,15 @@ export function romanizeDevanagariWord(word: string): string {
         result += baseRom;
         i += 2;
       } else if (afterNext in MATRAS) {
-        result += baseRom + MATRAS[afterNext];
+        let matraRom = MATRAS[afterNext];
+        if (afterNext === 'ा') {
+          const isWordEnd = i + 3 >= len || word[i + 3] === ' ' || /[\s\p{P}]/u.test(word[i + 3]);
+          matraRom = isWordEnd && len > 3 ? 'a' : 'aa';
+        } else if (afterNext === 'ू') {
+          const isWordEnd = i + 3 >= len || word[i + 3] === ' ' || /[\s\p{P}]/u.test(word[i + 3]);
+          if (isWordEnd) matraRom = 'u';
+        }
+        result += baseRom + matraRom;
         i += 2;
       } else if (i + 2 >= len || word[i + 2] === ' ' || /[\s\p{P}]/u.test(word[i + 2])) {
         // Word ending schwa deletion
@@ -79,7 +88,15 @@ export function romanizeDevanagariWord(word: string): string {
         i += 1; // skip virama
       } else if (nextChar in MATRAS) {
         // Matra replaces inherent 'a'
-        result += baseRom + MATRAS[nextChar];
+        let matraRom = MATRAS[nextChar];
+        if (nextChar === 'ा') {
+          const isWordEnd = i + 2 >= len || word[i + 2] === ' ' || /[\s\p{P}]/u.test(word[i + 2]);
+          matraRom = isWordEnd && len > 2 ? 'a' : 'aa';
+        } else if (nextChar === 'ू') {
+          const isWordEnd = i + 2 >= len || word[i + 2] === ' ' || /[\s\p{P}]/u.test(word[i + 2]);
+          if (isWordEnd) matraRom = 'u';
+        }
+        result += baseRom + matraRom;
         i += 1; // skip matra
       } else if (i + 1 >= len || nextChar === ' ' || /[\s\p{P}]/u.test(nextChar)) {
         // Word ending schwa deletion (e.g. रात -> raat, not raata)
@@ -96,7 +113,7 @@ export function romanizeDevanagariWord(word: string): string {
       continue;
     }
 
-    // 4. Matra without consonant (unusual, but handle)
+    // 4. Matra without consonant (fallback)
     if (char in MATRAS) {
       result += MATRAS[char];
       continue;

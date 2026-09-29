@@ -174,6 +174,10 @@ class SaavnProvider(MusicProvider):
             songs = parse_songs_response(raw)
             if not songs:
                 raise ProviderNotFound(f"Song not found: {song_id}", provider=PROVIDER)
+            # Pre-populate media cache so resolve_media hits cache immediately
+            media = norm_media(songs[0])
+            if media:
+                await self._cache.set(f"saavn:media:{song_id}", media, ttl=settings.CACHE_TTL_MEDIA)
             return norm_song(songs[0])
 
         return await self._cached(cache_key, _fetch, ttl=settings.CACHE_TTL_SONG)
@@ -219,6 +223,13 @@ class SaavnProvider(MusicProvider):
                     ttl=settings.CACHE_TTL_SONG,
                     stale_window=settings.CACHE_STALE_WINDOW,
                 )
+                media = norm_media(parsed)
+                if media:
+                    await self._cache.set(
+                        f"saavn:media:{parsed['id']}",
+                        media,
+                        ttl=settings.CACHE_TTL_MEDIA,
+                    )
 
         # Return in original order
         return [cached[sid] for sid in ids if sid in cached]

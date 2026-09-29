@@ -20,6 +20,9 @@ import time
 from collections import Counter
 from typing import Optional
 
+from urllib.parse import urlparse
+
+from app.config import settings
 from app.core.errors import ProviderError, ProviderNotFound
 from app.models import (
     Album,
@@ -34,6 +37,7 @@ from app.models import (
 )
 from app.providers.base import MusicProvider
 from app.providers.saavn.provider import SaavnProvider
+from app.providers.spotify.provider import SpotifyProvider
 from app.providers.youtube.provider import YouTubeProvider
 
 logger = logging.getLogger(__name__)
@@ -536,9 +540,11 @@ class HybridMusicProvider(MusicProvider):
         self,
         saavn_provider: SaavnProvider,
         youtube_provider: YouTubeProvider,
+        spotify_provider: Optional[SpotifyProvider] = None,
     ) -> None:
         self.saavn = saavn_provider
         self.youtube = youtube_provider
+        self.spotify = spotify_provider or SpotifyProvider(cache=getattr(saavn_provider, "_cache", None))
         self._search_cache: dict[str, tuple[float, SearchResults]] = {}
         self._cache_ttl = 90.0  # 90 seconds query cache
         self._inflight_searches: dict[str, asyncio.Task[SearchResults]] = {}
@@ -734,6 +740,10 @@ class HybridMusicProvider(MusicProvider):
 
     async def get_song(self, song_id: str) -> Song:
         sid = song_id.strip()
+        if sid.startswith("spotify:") or sid.startswith("sp:"):
+            clean_sp_id = sid.split(":", 1)[1] if ":" in sid else sid
+            return await self.spotify.get_song(clean_sp_id)
+
         if sid.startswith("youtube:") or sid.startswith("yt:"):
             return await self.youtube.get_song(sid)
 
@@ -750,10 +760,14 @@ class HybridMusicProvider(MusicProvider):
     async def get_songs(self, song_ids: list[str]) -> list[Song]:
         saavn_ids: list[tuple[int, str]] = []
         yt_ids: list[tuple[int, str]] = []
+        spotify_ids: list[tuple[int, str]] = []
 
         for idx, sid in enumerate(song_ids):
             clean_s = sid.strip()
-            if clean_s.startswith("youtube:") or clean_s.startswith("yt:"):
+            if clean_s.startswith("spotify:") or clean_s.startswith("sp:"):
+                clean_sp = clean_s.split(":", 1)[1] if ":" in clean_s else clean_s
+                spotify_ids.append((idx, clean_sp))
+            elif clean_s.startswith("youtube:") or clean_s.startswith("yt:"):
                 yt_ids.append((idx, clean_s))
             else:
                 if clean_s.startswith("saavn:"):
@@ -761,6 +775,11 @@ class HybridMusicProvider(MusicProvider):
                 saavn_ids.append((idx, clean_s))
 
         results: list[Optional[Song]] = [None] * len(song_ids)
+
+        if spotify_ids:
+            sp_res = await self.spotify.get_songs([sid for _, sid in spotify_ids])
+            for (idx, _), song in zip(spotify_ids, sp_res):
+                results[idx] = song
 
         if saavn_ids:
             s_res = await self.saavn.get_songs([sid for _, sid in saavn_ids])
@@ -801,9 +820,15 @@ class HybridMusicProvider(MusicProvider):
     # ── Pass-throughs ─────────────────────────────────────────────────────────
 
     async def resolve_url(self, url: str):
-        if "youtube.com" in url or "youtu.be" in url:
-            return await self.youtube.resolve_url(url)
-        return await self.saavn.resolve_url(url)
+        clean_url = url.strip()
+        parsed = urlparse(clean_url)
+        hostname = (parsed.hostname or "").lower()
+
+        if hostname in settings.SPOTIFY_ALLOWED_HOSTS or "spotify" in hostname:
+            return await self.spotify.resolve_url(clean_url)
+        if hostname in settings.YOUTUBE_ALLOWED_HOSTS or "youtube" in hostname or "youtu.be" in hostname:
+            return await self.youtube.resolve_url(clean_url)
+        return await self.saavn.resolve_url(clean_url)
 
     async def get_lyrics(self, lyrics_id: str) -> Lyrics:
         clean_lid = lyrics_id.strip()
@@ -817,7 +842,12 @@ class HybridMusicProvider(MusicProvider):
         return await self.saavn.get_album(album_id)
 
     async def get_playlist(self, playlist_id: str) -> Playlist:
-        return await self.saavn.get_playlist(playlist_id)
+        pid = playlist_id.strip()
+        if pid.startswith("spotify:"):
+            return await self.spotify.get_playlist(pid)
+        if pid.startswith("youtube:") or pid.startswith("yt:"):
+            return await self.youtube.get_playlist(pid)
+        return await self.saavn.get_playlist(pid)
 
     async def get_artist(self, artist_id: str) -> Artist:
         return await self.saavn.get_artist(artist_id)

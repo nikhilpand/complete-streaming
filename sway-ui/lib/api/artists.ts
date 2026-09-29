@@ -9,9 +9,9 @@ function rawId(id: string): string {
 export async function getArtist(id: string, signal?: AbortSignal) {
   return fetchApi<Artist>(`/artists/${rawId(id)}`, { signal });
 }
-export async function getArtistSongs(id: string, page = 1, n = 50, signal?: AbortSignal) {
+export async function getArtistSongs(id: string, page = 0, n = 50, signal?: AbortSignal) {
   return fetchApi<Song[]>(`/artists/${rawId(id)}/songs?page=${page}&n=${n}`, { signal });
 }
-export async function getArtistAlbums(id: string, page = 1, n = 50, signal?: AbortSignal) {
+export async function getArtistAlbums(id: string, page = 0, n = 50, signal?: AbortSignal) {
   return fetchApi<Album[]>(`/artists/${rawId(id)}/albums?page=${page}&n=${n}`, { signal });
 }

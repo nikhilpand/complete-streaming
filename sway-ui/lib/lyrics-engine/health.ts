@@ -63,6 +63,11 @@ class HealthTracker {
     health.totalRequests++;
     health.failureCount++;
     health.lastFailureAt = Date.now();
+    if (latencyMs !== undefined && latencyMs > 0) {
+      health.averageLatencyMs = health.averageLatencyMs === 0
+        ? latencyMs
+        : Math.round(health.averageLatencyMs * 0.8 + latencyMs * 0.2);
+    }
 
     if (failureClass === 'TIMEOUT') {
       health.timeoutCount++;

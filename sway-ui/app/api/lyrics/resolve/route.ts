@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveLyrics } from '@/lib/lyrics-engine/ultraLyricsResolver';
 
-const ENGINE_VERSION = 'v4';
+const ENGINE_VERSION = 'v6';
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;

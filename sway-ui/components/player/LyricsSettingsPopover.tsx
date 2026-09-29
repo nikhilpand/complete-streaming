@@ -9,11 +9,10 @@ import {
   LyricsFontFamily,
   LyricsContrast,
   LyricsBlur,
-  LyricsAlign,
   LyricsLayoutMode,
   LyricsBackgroundStyle,
 } from '@/store/useLyricsSettings';
-import { Settings2, RotateCcw, ExternalLink, Sparkles, Layout, Palette, Music } from 'lucide-react';
+import { Settings2, RotateCcw, ExternalLink, Sparkles, Layout, Palette } from 'lucide-react';
 import Link from 'next/link';
 
 interface LyricsSettingsPopoverProps {

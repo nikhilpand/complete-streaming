@@ -5,6 +5,8 @@ import { QueuePanel } from '@/components/player/QueuePanel';
 import { PlaybackController } from '@/components/shell/PlaybackController';
 import { SearchCommand } from '@/components/search/SearchCommand';
 import { MobileNav } from '@/components/shell/MobileNav';
+import { RouteScrollReset } from '@/components/shell/RouteScrollReset';
+import { SessionResumeBanner } from '@/components/shell/SessionResumeBanner';
 
 /**
  * All client-only overlay components bundled together.
@@ -14,6 +16,8 @@ import { MobileNav } from '@/components/shell/MobileNav';
 export default function ClientShell() {
   return (
     <>
+      <RouteScrollReset />
+      <SessionResumeBanner />
       <PlaybackController />
       <Player />
       <LyricsPanel />

@@ -13,6 +13,7 @@ function cleanStringForComparison(str: string): string {
   return (str || '')
     .toLowerCase()
     .normalize('NFKC')
+    .replace(/\s*(?:\[|\()(?:feat\.?|ft\.?|with|featuring)[^\]\)]*(?:\]|\))/gi, '')
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();

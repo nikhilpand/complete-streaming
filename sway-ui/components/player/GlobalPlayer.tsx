@@ -1,12 +1,35 @@
 'use client';
-import { Play, Pause, SkipBack, SkipForward, List, Mic2, Repeat, Shuffle, Repeat1, X } from 'lucide-react';
+
+import { useState, useCallback } from 'react';
+import Link from 'next/link';
+import {
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  List,
+  Mic2,
+  Repeat,
+  Shuffle,
+  Repeat1,
+  X,
+  Heart,
+  Share2,
+  Check,
+  Download,
+  Loader2,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '@/store/playerStore';
+import { useLikedSongs } from '@/store/useLikedSongs';
 import { Artwork } from '@/components/artwork/Artwork';
 import { IconButton } from '@/components/ui/IconButton';
 import { ProgressBar } from './ProgressBar';
 import { VolumeControl } from './VolumeControl';
+import { SleepTimerControl } from './SleepTimerControl';
+import { ShortcutsModal } from './ShortcutsModal';
 import { cn, artistNames } from '@/lib/utils';
+import { downloadSong, type DownloadStatus } from '@/lib/download';
 
 export function Player() {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -20,6 +43,29 @@ export function Player() {
   const toggleQueue = usePlayerStore((s) => s.toggleQueue);
   const toggleLyrics = usePlayerStore((s) => s.toggleLyrics);
   const togglePlayPause = usePlayerStore((s) => s.togglePlayPause);
+  const isLiked = useLikedSongs((s) => s.isLiked(currentTrack?.id));
+  const toggleLike = useLikedSongs((s) => s.toggleLike);
+
+  const [copied, setCopied] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>('idle');
+
+  const handleCopySongLink = useCallback(() => {
+    if (!currentTrack) return;
+    const url = `${window.location.origin}/song/${encodeURIComponent(currentTrack.id)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [currentTrack]);
+
+  const handleDownloadCurrentTrack = useCallback(async () => {
+    if (!currentTrack) return;
+    try {
+      await downloadSong(currentTrack, (s) => setDownloadStatus(s));
+    } catch {
+      // Handled in downloadSong
+    }
+  }, [currentTrack]);
 
   if (!currentTrack) return null;
 
@@ -65,24 +111,101 @@ export function Player() {
             <div className="relative h-full flex flex-col px-4">
               <div className="flex-1 flex items-center gap-3 pb-1 h-full pt-1">
                 {/* Track info - animated on track change */}
-                <AnimatePresence mode="popLayout" initial={false}>
-                  <motion.button
-                    key={currentTrack.id}
-                    className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer group"
-                    onClick={toggleLyrics}
-                    aria-label="Open lyrics player"
-                    initial={{ opacity: 0, x: -8 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 8 }}
-                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    <motion.div
+                      key={currentTrack.id}
+                      className="flex items-center gap-3 flex-1 min-w-0"
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 8 }}
+                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <button
+                        type="button"
+                        onClick={toggleLyrics}
+                        className="relative group/art shrink-0 cursor-pointer rounded-[--radius-sm] overflow-hidden"
+                        title="Open Fullscreen Lyrics & Stage"
+                        aria-label="Open lyrics view"
+                      >
+                        <Artwork
+                          src={currentTrack.artwork_url}
+                          alt={currentTrack.title}
+                          size={42}
+                          className="rounded-[--radius-sm] group-hover/art:opacity-85 transition-opacity ring-1 ring-white/10 shadow-lg"
+                        />
+                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/art:opacity-100 transition-opacity flex items-center justify-center">
+                          <Mic2 className="w-3.5 h-3.5 text-white" />
+                        </div>
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <Link
+                          href={`/song/${encodeURIComponent(currentTrack.id)}`}
+                          className="block text-sm font-medium text-[--foreground] hover:text-[--art-primary] hover:underline truncate transition-colors cursor-pointer"
+                          title={`View song: ${currentTrack.title}`}
+                        >
+                          {currentTrack.title}
+                        </Link>
+                        <div className="text-xs text-[--muted] truncate">
+                          {currentTrack.artists && currentTrack.artists.length > 0 && currentTrack.artists[0]?.id ? (
+                            <Link
+                              href={`/artist/${encodeURIComponent(currentTrack.artists[0].id)}`}
+                              className="hover:text-[--foreground] hover:underline transition-colors"
+                              title={`Artist: ${currentTrack.artists[0].name}`}
+                            >
+                              {artistNames(currentTrack.artists, currentTrack.subtitle)}
+                            </Link>
+                          ) : (
+                            <span>{artistNames(currentTrack.artists, currentTrack.subtitle)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  </AnimatePresence>
+                  <IconButton
+                    sz="sm"
+                    onClick={() => toggleLike(currentTrack)}
+                    className={cn(
+                      'shrink-0 hover:scale-110 transition-all hidden sm:inline-flex',
+                      isLiked ? 'text-rose-500 hover:text-rose-400' : 'text-white/40 hover:text-white/80'
+                    )}
+                    aria-label={isLiked ? 'Unlike song' : 'Like song'}
+                    title={isLiked ? 'Unlike song' : 'Like song'}
                   >
-                    <Artwork src={currentTrack.artwork_url} alt={currentTrack.title} size={42} className="rounded-[--radius-sm] group-hover:opacity-85 transition-opacity ring-1 ring-white/10 shadow-lg" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[--foreground] group-hover:text-[--art-primary] truncate transition-colors">{currentTrack.title}</p>
-                      <p className="text-xs text-[--muted] truncate">{artistNames(currentTrack.artists)}</p>
-                    </div>
-                  </motion.button>
-                </AnimatePresence>
+                    <Heart className={cn('w-4 h-4', isLiked && 'fill-current')} />
+                  </IconButton>
+                  <IconButton
+                    sz="sm"
+                    onClick={handleDownloadCurrentTrack}
+                    disabled={downloadStatus === 'resolving' || downloadStatus === 'downloading'}
+                    className="shrink-0 hover:scale-110 transition-all text-white/40 hover:text-white"
+                    title={
+                      downloadStatus === 'complete'
+                        ? 'Downloaded!'
+                        : downloadStatus === 'resolving' || downloadStatus === 'downloading'
+                        ? 'Downloading audio...'
+                        : 'Download song (320kbps)'
+                    }
+                    aria-label="Download song"
+                  >
+                    {downloadStatus === 'resolving' || downloadStatus === 'downloading' ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-[--art-primary]" />
+                    ) : downloadStatus === 'complete' ? (
+                      <Check className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <Download className="w-4 h-4" />
+                    )}
+                  </IconButton>
+                  <IconButton
+                    sz="sm"
+                    onClick={handleCopySongLink}
+                    className="shrink-0 hover:scale-110 transition-all text-white/40 hover:text-white"
+                    title={copied ? 'Song link copied!' : 'Copy song link'}
+                    aria-label="Copy song link"
+                  >
+                    {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
+                  </IconButton>
+                </div>
 
                 {/* Center controls */}
                 <div className="flex items-center gap-1 flex-shrink-0 sm:flex-1 justify-end sm:justify-center">
@@ -111,6 +234,7 @@ export function Player() {
 
                 {/* Right controls */}
                 <div className="hidden md:flex items-center gap-1 flex-1 justify-end">
+                  <SleepTimerControl />
                   <IconButton sz="sm" onClick={toggleLyrics} aria-label="Lyrics" title="Lyrics (Full Screen)">
                     <Mic2 className="w-4 h-4 text-[--art-primary]" />
                   </IconButton>
@@ -130,6 +254,7 @@ export function Player() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ShortcutsModal />
     </>
   );
 }

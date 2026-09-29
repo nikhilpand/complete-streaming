@@ -124,6 +124,20 @@ class TestSongsEndpoint:
         resp = client.get("/api/v1/songs/invalid!@id")
         assert resp.status_code == 400
 
+    def test_songs_youtube_id_prefix_preserved(self, client):
+        # Invalid chars in youtube ID still fail
+        resp = client.get("/api/v1/songs/youtube:invalid!@id")
+        assert resp.status_code == 400
+
+    def test_extended_id_lengths(self, client):
+        # 34-character playlist ID (typical YouTube playlist length) must not trigger 400 regex validation failure
+        resp_pl = client.get("/api/v1/playlists/PL4fGSIFcz9TD3pB8vK8z_qg1t_vK7f91F")
+        assert resp_pl.status_code != 400
+
+        # Long album ID must not trigger 400 regex validation failure
+        resp_al = client.get("/api/v1/albums/album_long_id_testing_length_boundary_1234567890")
+        assert resp_al.status_code != 400
+
 
 class TestLyricsEndpoint:
     @respx.mock

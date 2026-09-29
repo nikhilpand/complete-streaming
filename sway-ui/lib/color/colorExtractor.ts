@@ -6,7 +6,19 @@ export interface Palette {
   h: number; s: number; l: number;
 }
 
+const MAX_CACHE_SIZE = 500;
 const cache = new Map<string, Palette>();
+
+function setCachedPalette(key: string, val: Palette): void {
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) {
+      cache.delete(oldestKey);
+    }
+  }
+  cache.set(key, val);
+}
+
 let fac: FastAverageColor | null = null;
 
 function getFac() {
@@ -58,10 +70,12 @@ export async function extractPalette(imageUrl: string): Promise<Palette> {
     const { r, g, b } = saturate(ri, gi, bi);
     const { h, s, l } = rgbToHsl(r, g, b);
     const palette: Palette = { r, g, b, h, s, l, primary: `rgb(${r},${g},${b})` };
-    cache.set(imageUrl, palette);
+    setCachedPalette(imageUrl, palette);
     return palette;
   } catch {
-    return defaultPalette();
+    const fallback = defaultPalette();
+    setCachedPalette(imageUrl, fallback);
+    return fallback;
   }
 }
 

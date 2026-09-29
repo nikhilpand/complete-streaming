@@ -1,29 +1,49 @@
 'use client';
 
-import React, { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import React from 'react';
 import { usePlayerStore } from '@/store/playerStore';
-import { FullScreenLyrics } from '@/components/player/FullScreenLyrics';
-import { Music2, Play, Sparkles } from 'lucide-react';
+import { Music2, Play, Sparkles, Maximize2 } from 'lucide-react';
 import Link from 'next/link';
+import { Artwork } from '@/components/artwork/Artwork';
+import { artistNames } from '@/lib/utils';
 
 export default function LyricsPage() {
-  const router = useRouter();
   const currentTrack = usePlayerStore((s) => s.currentTrack);
-  const isLyricsOpen = usePlayerStore((s) => s.isLyricsOpen);
   const toggleLyrics = usePlayerStore((s) => s.toggleLyrics);
-
-  useEffect(() => {
-    // If navigating directly to /lyrics and isLyricsOpen was false, enable it
-    if (currentTrack && !isLyricsOpen) {
-      usePlayerStore.setState({ isLyricsOpen: true });
-    }
-  }, [currentTrack, isLyricsOpen]);
 
   if (currentTrack) {
     return (
-      <div className="relative w-full h-full min-h-screen">
-        <FullScreenLyrics onClose={() => router.push('/')} />
+      <div className="flex flex-col items-center justify-center min-h-[75vh] px-6 text-center select-none py-12">
+        <div className="relative group mb-6">
+          <Artwork
+            src={currentTrack.artwork_url}
+            alt={currentTrack.title}
+            size={180}
+            className="rounded-3xl shadow-2xl ring-1 ring-white/10"
+          />
+          <button
+            onClick={toggleLyrics}
+            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-3xl flex items-center justify-center text-white cursor-pointer"
+            aria-label="Open Fullscreen Lyrics"
+          >
+            <Maximize2 size={32} />
+          </button>
+        </div>
+
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-1 max-w-lg truncate">
+          {currentTrack.title}
+        </h1>
+        <p className="text-sm text-white/60 mb-6">
+          {artistNames(currentTrack.artists)}
+        </p>
+
+        <button
+          onClick={toggleLyrics}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[--art-primary,#6366f1] text-white font-semibold text-sm hover:brightness-110 active:scale-95 transition-all shadow-lg cursor-pointer"
+        >
+          <Maximize2 size={16} />
+          <span>Open Fullscreen Lyrics Stage</span>
+        </button>
       </div>
     );
   }

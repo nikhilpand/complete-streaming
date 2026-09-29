@@ -87,3 +87,6 @@ yarn-error.log*
 
 # Temporary scratch / test outputs
 test_screenshot.png
+help/
+fixtures/
+

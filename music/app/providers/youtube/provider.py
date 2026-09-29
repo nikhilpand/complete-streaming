@@ -440,21 +440,42 @@ class YouTubeProvider(MusicProvider):
 
         def _extract():
             import yt_dlp
-            ydl_opts = {
-                "format": "bestaudio[ext=m4a]/bestaudio/best",
+            # Fast path: android client resolves standalone streams in ~1.3s without PO-token delays
+            ydl_opts_fast = {
+                "format": "bestaudio/best",
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
                 "noplaylist": True,
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["android", "ios", "mweb", "web"]
+                        "player_client": ["android"]
                     }
                 },
             }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
-                return info
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_fast) as ydl:
+                    info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
+                    if info and (info.get("url") or info.get("formats")):
+                        return info
+            except Exception as e:
+                logger.debug("Fast android extraction failed for %s (%s), falling back", vid, e)
+
+            # Fallback path if android client is restricted
+            ydl_opts_fallback = {
+                "format": "bestaudio/best",
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "noplaylist": True,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["web", "mweb"]
+                    }
+                },
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
+                return ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
 
         try:
             info = await asyncio.to_thread(_extract)
@@ -519,8 +540,18 @@ class YouTubeProvider(MusicProvider):
         if not results.songs:
             return None
 
-        top_song = await self.get_song(results.songs[0].provider_id)
-        return await self.resolve_media(top_song)
+        target_item = results.songs[0]
+        vid = target_item.provider_id
+        target_song = Song(
+            id=f"youtube:{vid}",
+            provider="youtube",
+            provider_id=vid,
+            title=target_item.title,
+            artists=[],
+            featured_artists=[],
+            has_media=True,
+        )
+        return await self.resolve_media(target_song)
 
     # ── Candidate Discovery (YouTube Music Integration) ───────────────────────
 
@@ -633,7 +664,12 @@ class YouTubeProvider(MusicProvider):
     # ── Unsupported endpoints default graceful returns ────────────────────────
 
     async def resolve_url(self, url: str):
-        # Extract video ID from youtube URL
+        # 1. Extract playlist ID from youtube URL if present
+        match_pl = re.search(r"list=([A-Za-z0-9_\-]+)", url)
+        if match_pl:
+            return await self.get_playlist(match_pl.group(1))
+
+        # 2. Extract video ID from youtube URL
         match = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_\-]{11})", url)
         if match:
             return await self.get_song(match.group(1))
@@ -652,7 +688,223 @@ class YouTubeProvider(MusicProvider):
         raise ProviderNotFound("YouTube albums not implemented", provider="youtube")
 
     async def get_playlist(self, playlist_id: str) -> Playlist:
-        raise ProviderNotFound("YouTube playlists not implemented", provider="youtube")
+        raw = playlist_id.strip()
+        if raw.startswith("youtube:playlist:"):
+            raw = raw[17:]
+        elif raw.startswith("youtube:"):
+            raw = raw[8:]
+        elif raw.startswith("yt:"):
+            raw = raw[3:]
+        elif raw.startswith("playlist:"):
+            raw = raw[9:]
+
+        clean_pid = raw
+        if not re.match(r"^[A-Za-z0-9_\-]{2,64}$", clean_pid):
+            raise ProviderInvalidRequest(
+                f"Invalid YouTube playlist ID format: {playlist_id!r}",
+                provider="youtube",
+            )
+
+        cache_key = f"yt:playlist:{clean_pid}"
+        if self._cache:
+            val, status = await self._cache.get(cache_key)
+            if status == "hit" and val is not None:
+                return val
+
+        # 1. Fast Path: ytmusicapi
+        def _fetch_yt_playlist():
+            yt = self._get_yt()
+            for target in (clean_pid, f"VL{clean_pid}" if not clean_pid.startswith("VL") else clean_pid[2:]):
+                try:
+                    data = yt.get_playlist(target, limit=None)
+                    if data and (data.get("title") or data.get("tracks")):
+                        return data
+                except Exception as e:
+                    logger.debug("ytmusicapi get_playlist failed for %s (%s)", target, e)
+            return None
+
+        data = None
+        try:
+            data = await self._yt_call(_fetch_yt_playlist)
+        except Exception as e:
+            logger.debug("ytmusicapi call error: %s", e)
+
+        title = "YouTube Playlist"
+        artwork = ""
+        owner = "YouTube"
+        songs: list[Song] = []
+
+        if data and data.get("tracks"):
+            title = data.get("title") or "YouTube Playlist"
+            author_val = data.get("author")
+            if isinstance(author_val, dict):
+                owner = author_val.get("name") or "YouTube Music"
+            elif isinstance(author_val, str) and author_val.strip():
+                owner = author_val.strip()
+            elif isinstance(author_val, list) and author_val:
+                owner = author_val[0].get("name", "YouTube Music")
+
+            thumbnails = data.get("thumbnails", [])
+            artwork = _best_thumbnail(thumbnails) or ""
+
+            for track in data.get("tracks", []):
+                vid = track.get("videoId")
+                if not vid:
+                    continue
+                t_title = (track.get("title") or "YouTube Track").strip()
+                t_artists_raw = track.get("artists") or []
+                artists: list[ArtistRef] = []
+                for a in t_artists_raw:
+                    if isinstance(a, dict):
+                        aname = a.get("name", "").strip()
+                        aid = a.get("id") or aname.lower().replace(" ", "_")
+                        if aname:
+                            artists.append(
+                                ArtistRef(
+                                    id=f"youtube:artist:{aid}",
+                                    provider="youtube",
+                                    provider_id=str(aid),
+                                    name=aname,
+                                    role="primary",
+                                )
+                            )
+                    elif isinstance(a, str) and a.strip():
+                        artists.append(
+                            ArtistRef(
+                                id=f"youtube:artist:{a.strip().lower().replace(' ', '_')}",
+                                provider="youtube",
+                                provider_id=a.strip().lower().replace(" ", "_"),
+                                name=a.strip(),
+                                role="primary",
+                            )
+                        )
+                if not artists:
+                    artists = [
+                        ArtistRef(
+                            id="youtube:artist:unknown",
+                            provider="youtube",
+                            provider_id="unknown",
+                            name=owner or "YouTube",
+                            role="primary",
+                        )
+                    ]
+
+                duration_s = track.get("duration_seconds")
+                duration_ms = (
+                    duration_s * 1000
+                    if duration_s
+                    else _parse_yt_length_ms(track.get("duration"))
+                )
+                t_thumbs = track.get("thumbnails", [])
+                t_art = _best_thumbnail(t_thumbs) or (
+                    f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg" if vid else artwork
+                )
+
+                canonical_song = Song(
+                    id=f"youtube:{vid}",
+                    provider="youtube",
+                    provider_id=vid,
+                    title=t_title,
+                    artists=artists,
+                    featured_artists=[],
+                    album=title,
+                    album_id=f"youtube:playlist:{clean_pid}",
+                    duration_ms=duration_ms,
+                    artwork_url=t_art,
+                    has_media=True,
+                    is_explicit=bool(track.get("isExplicit")),
+                    perma_url=f"https://music.youtube.com/watch?v={vid}",
+                )
+                songs.append(canonical_song)
+                if self._cache:
+                    await self._cache.set(f"yt:song:{vid}", canonical_song, ttl=86400)
+
+        # 2. Resilient Fallback: yt-dlp flat playlist extraction
+        if not songs:
+            def _extract_flat():
+                import yt_dlp
+                ydl_opts = {
+                    "extract_flat": "in_playlist",
+                    "skip_download": True,
+                    "quiet": True,
+                    "no_warnings": True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(
+                        f"https://www.youtube.com/playlist?list={clean_pid}",
+                        download=False,
+                    )
+
+            try:
+                info = await asyncio.to_thread(_extract_flat)
+                if info:
+                    title = info.get("title") or title
+                    owner = info.get("uploader") or info.get("channel") or owner
+                    thumbnails = info.get("thumbnails") or []
+                    artwork = _best_thumbnail(thumbnails) or artwork
+
+                    for entry in info.get("entries") or []:
+                        vid = entry.get("id")
+                        if not vid:
+                            continue
+                        e_title = entry.get("title") or "YouTube Track"
+                        uploader = entry.get("uploader") or owner
+                        e_artists = [
+                            ArtistRef(
+                                id=f"youtube:artist:{uploader.lower().replace(' ', '_')}",
+                                provider="youtube",
+                                provider_id=uploader.lower().replace(" ", "_"),
+                                name=uploader,
+                                role="primary",
+                            )
+                        ]
+                        duration_s = entry.get("duration")
+                        e_dur_ms = int(duration_s * 1000) if duration_s else None
+                        e_art = f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
+
+                        canonical_song = Song(
+                            id=f"youtube:{vid}",
+                            provider="youtube",
+                            provider_id=vid,
+                            title=e_title,
+                            artists=e_artists,
+                            featured_artists=[],
+                            album=title,
+                            album_id=f"youtube:playlist:{clean_pid}",
+                            duration_ms=e_dur_ms,
+                            artwork_url=e_art,
+                            has_media=True,
+                            is_explicit=False,
+                            perma_url=f"https://music.youtube.com/watch?v={vid}",
+                        )
+                        songs.append(canonical_song)
+                        if self._cache:
+                            await self._cache.set(f"yt:song:{vid}", canonical_song, ttl=86400)
+            except Exception as e:
+                logger.warning("yt-dlp flat playlist extraction failed for %s: %s", clean_pid, e)
+
+        if not songs:
+            raise ProviderNotFound(f"YouTube playlist not found or empty: {playlist_id}", provider="youtube")
+
+        playlist = Playlist(
+            id=f"youtube:{clean_pid}",
+            provider="youtube",
+            provider_id=clean_pid,
+            title=title,
+            artwork_url=artwork or (songs[0].artwork_url if songs else ""),
+            follower_count=None,
+            song_count=len(songs),
+            last_updated=None,
+            owner=owner,
+            perma_url=f"https://music.youtube.com/playlist?list={clean_pid}",
+            songs=songs,
+            extra={"curator": owner, "raw_id": clean_pid},
+        )
+
+        if self._cache:
+            await self._cache.set(cache_key, playlist, ttl=86400)
+
+        return playlist
 
     async def get_artist(self, artist_id: str) -> Artist:
         raise ProviderNotFound("YouTube artists not implemented", provider="youtube")

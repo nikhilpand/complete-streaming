@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+const BACKEND = (process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+
+function isInvalidPath(path: string[]): boolean {
+  return path.some((segment) => segment.includes('..') || segment.includes('/') || segment.includes('\\'));
+}
 
 function buildBackendUrl(path: string[], searchParams: URLSearchParams) {
   const cleanPath = path.map((segment) => {
-    if (segment.startsWith('youtube:') || segment.startsWith('yt:')) {
+    if (segment.startsWith('youtube:') || segment.startsWith('yt:') || segment.startsWith('spotify:')) {
       return segment;
     }
     return segment.replace(/^saavn:/, '');
@@ -15,8 +19,10 @@ function buildBackendUrl(path: string[], searchParams: URLSearchParams) {
   const sanitizedParams = new URLSearchParams(searchParams);
   if (sanitizedParams.has('page')) {
     const pageVal = parseInt(sanitizedParams.get('page') || '1', 10);
-    if (isNaN(pageVal) || pageVal < 1) {
-      sanitizedParams.set('page', '1');
+    const isOneIndexed = path[0] === 'search';
+    const minPage = isOneIndexed ? 1 : 0;
+    if (isNaN(pageVal) || pageVal < minPage) {
+      sanitizedParams.set('page', String(minPage));
     }
   }
   if (sanitizedParams.has('n')) {
@@ -44,6 +50,12 @@ function getProxyHeaders(req: NextRequest): Record<string, string> {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
+  if (isInvalidPath(path)) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid path segments', error_code: 'INVALID_PATH' },
+      { status: 400 }
+    );
+  }
 
   // Gracefully handle GET probes/prefetches on telemetry event ingestion
   if (
@@ -75,6 +87,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
+  if (isInvalidPath(path)) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid path segments', error_code: 'INVALID_PATH' },
+      { status: 400 }
+    );
+  }
   const url = buildBackendUrl(path, req.nextUrl.searchParams);
 
   try {
@@ -95,19 +113,79 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
 }
 
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  if (isInvalidPath(path)) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid path segments', error_code: 'INVALID_PATH' },
+      { status: 400 }
+    );
+  }
+  const url = buildBackendUrl(path, req.nextUrl.searchParams);
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: getProxyHeaders(req),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch {
+    return NextResponse.json(
+      { success: false, error: 'Backend unreachable', error_code: 'PROXY_ERROR' },
+      { status: 503 }
+    );
+  }
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
+  if (isInvalidPath(path)) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid path segments', error_code: 'INVALID_PATH' },
+      { status: 400 }
+    );
+  }
   const url = buildBackendUrl(path, req.nextUrl.searchParams);
 
   try {
     const body = await req.json().catch(() => ({}));
     const res = await fetch(url, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getProxyHeaders(req),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
     const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch {
+    return NextResponse.json(
+      { success: false, error: 'Backend unreachable', error_code: 'PROXY_ERROR' },
+      { status: 503 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  if (isInvalidPath(path)) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid path segments', error_code: 'INVALID_PATH' },
+      { status: 400 }
+    );
+  }
+  const url = buildBackendUrl(path, req.nextUrl.searchParams);
+
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: getProxyHeaders(req),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json().catch(() => ({ success: res.ok }));
     return NextResponse.json(data, { status: res.status });
   } catch {
     return NextResponse.json(

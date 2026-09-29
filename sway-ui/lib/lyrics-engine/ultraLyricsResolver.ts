@@ -13,7 +13,7 @@
 
 import { createTrackIdentity } from './identity';
 import { normalizeMetadata } from './normalizer';
-import { validateCandidate, validateWordSyncStructure } from './validator';
+import { validateCandidate } from './validator';
 import { scoreLyricsCandidate, evaluateAcceptance } from './matcher';
 import { parseStrictLRC } from './parsers/lrcParser';
 import { parseRichSync } from './parsers/richsyncParser';
@@ -84,7 +84,10 @@ export async function resolveLyrics(params: ResolveRequestParams): Promise<Lyric
   return inFlightDeduplicator.run(identity.recordingKey, () => executeResolution(identity, params.streamUrl));
 }
 
-const BACKEND_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000') + '/api/v1';
+const isServer = typeof window === 'undefined';
+const BACKEND_BASE = isServer
+  ? (process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '') + '/api/v1'
+  : '/api/proxy';
 
 /**
  * Fetches cached sync from persistent storage as a competing candidate.

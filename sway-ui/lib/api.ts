@@ -8,7 +8,8 @@ import { fetchLyricsWithCache, type CachedLyrics } from './lyricsCache';
 
 export function getProxiedImageUrl(url?: string, width = 500, height = 500): string {
   if (!url) return '';
-  return artUrl(url);
+  const size = `${width}x${height}`;
+  return artUrl(url).replace(/\b500x500\b/g, size);
 }
 
 export interface LyricsResponse {

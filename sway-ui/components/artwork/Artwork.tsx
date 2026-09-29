@@ -54,6 +54,9 @@ export function Artwork({ src, alt, size = 48, className }: Props) {
       alt={alt}
       width={size}
       height={size}
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      decoding="async"
       onError={() => {
         if (!useFallback && src && src !== upgradedUrl) {
           setUseFallback(true);

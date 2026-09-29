@@ -20,7 +20,7 @@
 	--lyrics-font-weight: 700;
 	--lyrics-line-height: 1.38;
 	--lyrics-active-scale: 1.03;
-	--lyrics-blur-amount: 1.2px;
+	--lyrics-blur-amount: 0.8px;
 	--lyrics-inactive-opacity: 0.42;
 	--lyrics-text-align: left;
 	--lyrics-justify-content: flex-start;
@@ -90,7 +90,12 @@
 
 /* ── Apple Music Authentic Multi-Layer Fluid Artwork Engine ── */
 
-/* Canvas: Over-scaled to 190% with generous margin to eliminate blur edge-clipping */
+/* Canvas: Over-scaled to 190% with generous margin to eliminate blur edge-clipping.
+   GPU OPTIMIZATION:
+   - will-change:filter pre-allocates a dedicated GPU texture for the blur, so the browser
+     doesn't need to rasterize/re-paint on every animation frame — it composites instead.
+   - isolation:isolate creates a stacking context so child compositing doesn't leak.
+   - contain:layout style prevents layout/style recalculation from spilling outside this element. */
 .blyrics-fluid-canvas {
 	position: absolute;
 	inset: -45%;
@@ -100,10 +105,14 @@
 	pointer-events: none;
 	overflow: hidden;
 	filter: blur(95px) saturate(190%) brightness(var(--blyrics-background-brightness, 0.95));
-	transform: translate3d(0, 0, 0);
-	will-change: transform;
+	will-change: filter;
+	isolation: isolate;
+	contain: layout style;
 }
 
+/* GPU OPTIMIZATION: Each layer gets its own compositor tile.
+   will-change:transform + backface-visibility:hidden = dedicated GPU layer.
+   Transforms (translate3d/scale) are composited on-GPU; no software rasterization per frame. */
 .blyrics-fluid-layer {
 	position: absolute;
 	inset: 0;
@@ -113,11 +122,13 @@
 	background-size: cover;
 	transform-origin: center center;
 	transition: background-image 0.8s ease;
+	will-change: transform;
+	backface-visibility: hidden;
 }
 
 /* Layer 1: Base slow breathing anchor — 100% opacity blankets entire screen with true artwork colors */
 .blyrics-fluid-layer-1 {
-	transform: scale(1.6);
+	transform: scale(1.6) translateZ(0);
 	opacity: 1;
 	animation: appleFluidBase 30s ease-in-out infinite alternate;
 }
@@ -293,6 +304,9 @@
 	gap: clamp(1.8rem, 3.2vh, 2.6rem);
 	will-change: transform;
 	transform: translate3d(0, 0, 0);
+	/* GPU OPTIMIZATION: contain:layout style means the RAF transform updates on this element
+	   do not trigger layout/style recalculation for the rest of the page. */
+	contain: layout style;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -314,13 +328,15 @@
 	padding: clamp(0.2rem, 0.5vh, 0.4rem) 0;
 	box-sizing: border-box;
 	opacity: var(--lyrics-inactive-opacity, 0.42);
-	filter: blur(var(--lyrics-blur-amount, 1.2px));
+	filter: blur(var(--lyrics-blur-amount, 0.8px));
 	cursor: pointer;
 	user-select: none;
 	word-break: break-word;
 	width: 100%;
 	pointer-events: auto;
-	will-change: transform, opacity, filter;
+	/* GPU OPTIMIZATION: only promote active/neighbor lines below.
+	   Putting will-change on every line wastes GPU memory (one texture per line).
+	   Inactive lines use hardware-accelerated opacity only — no per-line blur compositor layer. */
 	border-radius: 10px;
 	text-shadow: none;
 	font-weight: 700;
@@ -370,15 +386,19 @@
 	transform: scale(0.95) translateX(-3px);
 }
 
-/* Neighbor lines — almost readable, slight blur cleared */
+/* Neighbor lines — almost readable, slight blur cleared.
+   GPU OPTIMIZATION: will-change here because neighbors are actively transitioning opacity/filter. */
 .blyrics--line.blyrics--neighbor {
 	transform: scale(0.98) translateX(-1px);
 	opacity: 0.52;
 	filter: blur(0.6px);
 	pointer-events: auto;
+	will-change: transform, opacity, filter;
 }
 
-/* ACTIVE LINE — Spring scale-up + soft luminous bloom */
+/* ACTIVE LINE — Spring scale-up + soft luminous bloom.
+   GPU OPTIMIZATION: will-change:transform,opacity,filter only here and on neighbors.
+   Active/neighbor are the ONLY lines in transition — promoting all ~50 lines wastes VRAM. */
 .blyrics--line.blyrics--active {
 	transform: scale(var(--blyrics-active-scale, 1.03)) translateX(0px) !important;
 	opacity: 1 !important;
@@ -389,6 +409,7 @@
 		0 0 35px rgba(255, 255, 255, 0.28),
 		0 0 70px rgba(255, 255, 255, 0.12) !important;
 	pointer-events: auto;
+	will-change: transform, opacity, filter;
 	transition:
 		transform    0.45s var(--spring-out),
 		opacity      0.32s ease-out,
@@ -1106,9 +1127,13 @@ nextjs-portal,
    3 FULL-SCREEN STAGE MODES (Apple Music | Vinyl | Cinema)
    ════════════════════════════════════════════════════════════ */
 
-/* Static Background (Battery Saver / Low GPU Mode) */
+/* Static Background (Battery Saver / Low GPU Mode)
+   GPU OPTIMIZATION: animation-play-state:paused FREEZES the transform in place without
+   destroying the compositor layer. Using animation:none would drop will-change promotion
+   and cause a full software rasterization on every paint. Paused keeps the GPU texture
+   alive at zero cost — the layer exists but nothing moves → 0% GPU fill-rate usage. */
 .blyrics-fluid-canvas.motion-static .blyrics-fluid-layer {
-	animation: none !important;
+	animation-play-state: paused !important;
 }
 
 /* Mode 2: Vinyl / Album Art Focus Mode */

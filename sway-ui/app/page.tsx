@@ -11,33 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { artistNames } from '@/lib/utils';
 import type { Song } from '@/lib/api/types';
 
-// ─── Persistent client-side recently played list ────────────────────────────
-const RECENT_KEY = 'sway_recently_played';
-const MAX_RECENT = 20;
-
-function loadRecentlyPlayed(): Song[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(RECENT_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveRecentlyPlayed(songs: Song[]) {
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(songs.slice(0, MAX_RECENT)));
-  } catch {}
-}
-
-function addRecentlyPlayed(song: Song): Song[] {
-  const prev = loadRecentlyPlayed();
-  const filtered = prev.filter((s) => s.id !== song.id);
-  const next = [song, ...filtered].slice(0, MAX_RECENT);
-  saveRecentlyPlayed(next);
-  return next;
-}
+import { useRecentHistory } from '@/store/useRecentHistory';
 
 // ─── Sanitize helper ─────────────────────────────────────────────────────────
 const DERIVATIVE_REGEX = /\b(workout|bpm|sped\s*up|speed\s*up|super\s*speed\s*up|slowed|reverb|nightcore|8d(?:\s*audio)?|16d(?:\s*audio)?|karaoke|instrumental|cover|tribute|unplugged(?:\s*remix)?|drum\s*version|piano\s*version|mashup|lo-?fi)\b/i;
@@ -83,47 +57,24 @@ export default function HomePage() {
   const [feedState, setFeedState] = useState<'cold' | 'seeded' | 'learning' | 'personalized'>('cold');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>([]);
+  const [mounted, setMounted] = useState(false);
+
+  const recentHistory = useRecentHistory((s) => s.history);
+  const recentlyPlayed: Song[] = mounted ? recentHistory.map((h) => h.song) : [];
 
   const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
   const setQueue = usePlayerStore((s) => s.setQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const status = usePlayerStore((s) => s.status);
 
-  // Track the last song we recorded in recently-played so we don't duplicate
+  // Track the last song we observed so we don't duplicate
   const lastRecordedIdRef = useRef<string | null>(null);
   // Debounce timer for re-fetching home feed after listening
   const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load recently played from localStorage on mount
   useEffect(() => {
-    setRecentlyPlayed(loadRecentlyPlayed());
-  }, []);
-
-  // When a track starts playing: add to recently played + schedule home feed refresh
-  useEffect(() => {
-    if (!currentTrack || currentTrack.id === lastRecordedIdRef.current) return;
-    if (status !== 'playing') return;
-
-    lastRecordedIdRef.current = currentTrack.id;
-    const updated = addRecentlyPlayed(currentTrack);
-    setRecentlyPlayed(updated);
-
-    // Debounce: re-fetch home feed 30s after last track change
-    // (gives backend time to process telemetry events and update taste profile)
-    if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
-    refetchTimerRef.current = setTimeout(() => {
-      load();
-    }, 30_000);
-  }, [currentTrack?.id, status]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
-      abortRef.current?.abort();
-    };
+    setMounted(true);
   }, []);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -149,6 +100,28 @@ export default function HomePage() {
     } finally {
       if (!sig.aborted) setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (!currentTrack || currentTrack.id === lastRecordedIdRef.current) return;
+    if (status !== 'playing') return;
+
+    lastRecordedIdRef.current = currentTrack.id;
+
+    // Debounce: re-fetch home feed 30s after last track change
+    // (gives backend time to process telemetry events and update taste profile)
+    if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+    refetchTimerRef.current = setTimeout(() => {
+      load();
+    }, 30_000);
+  }, [currentTrack, status, load]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+      abortRef.current?.abort();
+    };
   }, []);
 
   useEffect(() => {

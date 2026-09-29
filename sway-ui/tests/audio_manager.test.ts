@@ -67,7 +67,7 @@ class MockAudioElement {
 // Global browser mocks
 (globalThis as any).Audio = MockAudioElement;
 (globalThis as any).window = globalThis;
-let rafCallbacks = new Map<number, (time: number) => void>();
+const rafCallbacks = new Map<number, (time: number) => void>();
 let nextRafId = 1;
 
 (globalThis as any).requestAnimationFrame = (cb: (time: number) => void) => {

@@ -130,6 +130,7 @@ export interface RichSyncWord {
 export interface RichSyncLine {
   ts: number; // line start in seconds
   te: number; // line end in seconds
+  text?: string;
   l: RichSyncWord[];
 }
 

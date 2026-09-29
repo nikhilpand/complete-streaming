@@ -1,12 +1,11 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { use } from 'react';
 import { Play, Shuffle } from 'lucide-react';
 import { getArtist } from '@/lib/api/artists';
 import { usePlayerStore } from '@/store/playerStore';
 import { SongRow } from '@/components/music/SongRow';
 import { AlbumCard } from '@/components/music/AlbumCard';
-import { HorizontalShelf } from '@/components/music/HorizontalShelf';
 import { Artwork } from '@/components/artwork/Artwork';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -21,14 +20,14 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
   const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
   const setQueue = usePlayerStore((s) => s.setQueue);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true); setError(null);
     try { setArtist(await getArtist(id)); }
     catch { setError("Couldn't load this artist."); }
     finally { setLoading(false); }
-  }
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); }, [load]);
 
   const topSongs = artist?.top_songs ?? [];
   const topAlbums = artist?.top_albums ?? [];

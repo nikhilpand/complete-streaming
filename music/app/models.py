@@ -10,7 +10,7 @@ Design principles:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -151,7 +151,7 @@ class MediaInfo(_Base):
     song_id: str
     provider: str
     streams: list[MediaStream] = Field(default_factory=list)
-    resolved_at: datetime = Field(default_factory=datetime.utcnow)
+    resolved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expires_hint: Optional[datetime] = None
 
 

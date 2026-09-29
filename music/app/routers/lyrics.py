@@ -29,6 +29,8 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 def _validate_id(lyrics_id: str) -> str:
     lid = lyrics_id.strip()
+    if ":" in lid:
+        lid = lid.split(":", 1)[1]
     if not _ID_RE.match(lid):
         raise ProviderInvalidRequest(f"Invalid lyrics ID format: {lid!r}", provider="saavn")
     return lid
