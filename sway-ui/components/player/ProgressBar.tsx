@@ -13,15 +13,18 @@ export function ProgressBar() {
   const [isHovered, setIsHovered] = useState(false);
 
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const durationRef = useRef(duration);
+  durationRef.current = duration;
 
   // Direct DOM updates on audioManager timeupdate for ultra-smooth 144fps playback with 0 React re-renders
   useEffect(() => {
     let unsub: (() => void) | undefined;
+    let cancelled = false;
     import('@/lib/audio/AudioManager').then(({ audioManager }) => {
-      if (!audioManager) return;
+      if (cancelled || !audioManager) return;
       unsub = audioManager.subscribe((ev) => {
         if (ev.type === 'timeupdate' && !isScrubbingRef.current) {
-          const d = ev.duration || duration;
+          const d = ev.duration || durationRef.current;
           if (d > 0) {
             const p = Math.min(100, Math.max(0, (ev.currentTime / d) * 100));
             if (fillRef.current) fillRef.current.style.width = `${p}%`;
@@ -30,9 +33,10 @@ export function ProgressBar() {
       });
     });
     return () => {
+      cancelled = true;
       unsub?.();
     };
-  }, [duration]);
+  }, []);
 
   const calculateTimeFromEvent = useCallback(
     (clientX: number): number | null => {

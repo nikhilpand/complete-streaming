@@ -50,7 +50,28 @@ export function SleepTimerControl() {
     };
   }, [setSleepTimer]);
 
-  // End-of-track mode: trigger on track end
+  // End-of-track mode: trigger on track end or transition
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    import('@/lib/audio/AudioManager').then(({ audioManager }) => {
+      if (cancelled || !audioManager) return;
+      unsub = audioManager.subscribe((ev) => {
+        if (
+          (ev.type === 'ended' || ev.type === 'transition_end') &&
+          usePlayerStore.getState().sleepTimerActive &&
+          timerRef.current?.isEndOfTrackMode()
+        ) {
+          timerRef.current.expireNow();
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, []);
+
   useEffect(() => {
     if (
       sleepTimerActive &&

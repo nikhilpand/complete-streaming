@@ -256,14 +256,12 @@ export function usePlayback() {
             });
           }
           break;
-        case 'transition_end':
-          const tQ = usePlayerStore.getState().queue;
-          const tIdx = usePlayerStore.getState().queueIndex;
-          const targetNext = tQ[tIdx + 1];
-          if (targetNext && (!ev.trackId || ev.trackId === targetNext.id)) {
-            usePlayerStore.getState().playNext();
-          }
+        case 'transition_end': {
+          const state = usePlayerStore.getState();
+          if (state.repeatMode === 'one') break;
+          state.playNext();
           break;
+        }
         case 'ended':
           const endedTrack = activeTrackRef.current;
           if (endedTrack && !milestonesFiredRef.current.completed) {

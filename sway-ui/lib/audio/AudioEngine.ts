@@ -472,6 +472,9 @@ export class AudioEngine {
     const safeUrl = this.normalizeUrl(url);
     if (pipeline.audio.src !== safeUrl) {
       pipeline.audio.src = safeUrl;
+      if (typeof pipeline.audio.load === 'function') {
+        pipeline.audio.load(); // explicitly start fetching
+      }
       pipeline.isLoaded = true;
     }
   }
@@ -485,7 +488,9 @@ export class AudioEngine {
     const safeUrl = this.normalizeUrl(url);
     if (standby.audio.src !== safeUrl) {
       standby.audio.src = safeUrl;
-      standby.audio.load();
+      if (typeof standby.audio.load === 'function') {
+        standby.audio.load();
+      }
       standby.isLoaded = true;
       if (standby.gainNode && this.audioContext) {
         standby.gainNode.gain.setValueAtTime(0.0, this.audioContext.currentTime);
@@ -753,6 +758,9 @@ export class AudioEngine {
       cleanup();
       this.cancelTransition();
       this.clearStandby();
+      this.isTransitioning = false;
+      this.emit({ type: 'ended' });
+      this.stopRaf();
     };
 
     const onPlaying = () => {

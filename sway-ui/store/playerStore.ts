@@ -356,11 +356,11 @@ export const usePlayerStore = create<PlayerStore>()(
           }
         },
         togglePlayPause: () => {
-          const { status } = get();
           if (typeof window !== 'undefined') {
             import('@/lib/audio/AudioManager')
               .then(({ audioManager }) => {
                 if (!audioManager) return;
+                const { status } = get();
                 if (status === 'playing') {
                   audioManager.pause();
                 } else {
