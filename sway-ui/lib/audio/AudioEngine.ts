@@ -296,6 +296,13 @@ export class AudioEngine {
     audio.addEventListener('ended', () => {
       if (!this.isCurrentPipeline(pipeId)) return;
 
+      // Invariant: If a transition (crossfade or gapless confirm) is actively underway,
+      // the outgoing pipeline reaching its natural end must NOT clear standby or emit ended.
+      // The ongoing transition timer / playing callback will finalize the pipeline swap.
+      if (this.isTransitioning) {
+        return;
+      }
+
       // Invariant: If repeatMode is 'one', never automatic transition to standby
       if (this.repeatMode === 'one') {
         this.clearStandby();
@@ -305,12 +312,12 @@ export class AudioEngine {
       }
 
       const standby = this.standbyPipeline;
-      if (this.hasUsableBuffer(standby, 0.5) && !this.isTransitioning) {
+      if (this.hasUsableBuffer(standby, 0.5)) {
         this.executeGaplessTransition(standby);
         return;
       }
 
-      // Standby not usable or already transitioning -> clean fallback to ended
+      // Standby not usable -> clean fallback to ended
       this.clearStandby();
       this.emit({ type: 'ended' });
       this.stopRaf();
@@ -419,8 +426,12 @@ export class AudioEngine {
         ? Math.max(0, Math.min(2, (settings.spatialWidth ?? 100) / 100))
         : 1.0;
 
-      const gainDirect = 0.5 * (1 + widthFactor);
-      const gainCross = 0.5 * (1 - widthFactor);
+      const gainDirectRaw = 0.5 * (1 + widthFactor);
+      const gainCrossRaw = 0.5 * (1 - widthFactor);
+      // Pan-law energy normalization: prevents runaway gain and phase clipping at wider widths
+      const normFactor = 1 / Math.max(1, Math.sqrt(gainDirectRaw * gainDirectRaw + gainCrossRaw * gainCrossRaw));
+      const gainDirect = gainDirectRaw * normFactor;
+      const gainCross = gainCrossRaw * normFactor;
 
       this.spatialGainLL.gain.setTargetAtTime(gainDirect, now, 0.03);
       this.spatialGainRL.gain.setTargetAtTime(gainCross, now, 0.03);
@@ -431,19 +442,19 @@ export class AudioEngine {
     // 5. Anti-Clipping Limiter & Loudness Normalization
     if (this.compressorNode) {
       if (settings.normalizationEnabled) {
-        // Active loudness normalization compressor
-        this.compressorNode.threshold.setTargetAtTime(-14.0, now, 0.03);
-        this.compressorNode.ratio.setTargetAtTime(4.0, now, 0.03);
-        this.compressorNode.knee.setTargetAtTime(10.0, now, 0.03);
-        this.compressorNode.attack.setTargetAtTime(0.003, now, 0.03);
+        // Broadcast loudness normalization: preserves dynamics with gentle ratio & soft knee
+        this.compressorNode.threshold.setTargetAtTime(-16.0, now, 0.03);
+        this.compressorNode.ratio.setTargetAtTime(3.0, now, 0.03);
+        this.compressorNode.knee.setTargetAtTime(12.0, now, 0.03);
+        this.compressorNode.attack.setTargetAtTime(0.015, now, 0.03);
         this.compressorNode.release.setTargetAtTime(0.25, now, 0.03);
       } else {
-        // Transparent brickwall peak limiter to prevent digital clipping
-        this.compressorNode.threshold.setTargetAtTime(-0.5, now, 0.03);
-        this.compressorNode.ratio.setTargetAtTime(16.0, now, 0.03);
-        this.compressorNode.knee.setTargetAtTime(2.0, now, 0.03);
-        this.compressorNode.attack.setTargetAtTime(0.001, now, 0.03);
-        this.compressorNode.release.setTargetAtTime(0.05, now, 0.03);
+        // Transparent peak limiter: high ceiling (-0.2 dBFS), fast recovery, zero pump
+        this.compressorNode.threshold.setTargetAtTime(-0.2, now, 0.03);
+        this.compressorNode.ratio.setTargetAtTime(20.0, now, 0.03);
+        this.compressorNode.knee.setTargetAtTime(1.0, now, 0.03);
+        this.compressorNode.attack.setTargetAtTime(0.003, now, 0.03);
+        this.compressorNode.release.setTargetAtTime(0.12, now, 0.03);
       }
     }
   }
@@ -597,7 +608,12 @@ export class AudioEngine {
     if (a.buffered && a.buffered.length > 0) {
       return bufferedAhead >= requiredSeconds;
     }
-    return readyState >= 3;
+    // If buffered property is defined but has 0 ranges, buffer is not usable
+    if (a.buffered && a.buffered.length === 0) {
+      return false;
+    }
+    // Fallback only if buffered API is completely unavailable (e.g. non-browser/mock environment)
+    return readyState >= 4;
   }
 
   public clearStandby(): void {
@@ -807,7 +823,7 @@ export class AudioEngine {
     });
   }
 
-  public cancelTransition() {
+  public cancelTransition(options: { clearStandby?: boolean } = { clearStandby: true }) {
     this.transitionGeneration++; // Invalidate any pending async transition callbacks
     if (this.transitionWatchdogTimer !== null) {
       clearTimeout(this.transitionWatchdogTimer);
@@ -831,6 +847,9 @@ export class AudioEngine {
         standby.gainNode.gain.setValueAtTime(0.0, now);
       }
       standby.audio.pause();
+    }
+    if (options.clearStandby) {
+      this.clearStandby();
     }
     this.isTransitioning = false;
   }

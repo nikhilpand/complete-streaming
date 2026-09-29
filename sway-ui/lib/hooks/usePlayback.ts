@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { usePlayerStore } from '@/store/playerStore';
 import { audioManager } from '@/lib/audio/AudioManager';
-import { resolveMedia, prefetchMedia } from '@/lib/api/songs';
+import { resolveMedia, prefetchMedia, getPlayableStreamUrl } from '@/lib/api/songs';
 import { sendTelemetry } from '@/lib/api/telemetry';
 import { scheduleExtract, applyPalette } from '@/lib/color/colorExtractor';
 import { artistNames, artUrl } from '@/lib/utils';
@@ -241,22 +241,22 @@ export function usePlayback() {
           break;
         case 'transition_start':
           setStatus('transitioning');
-          const transitingTrack = activeTrackRef.current;
-          if (transitingTrack && !milestonesFiredRef.current.completed) {
+          break;
+        case 'transition_end': {
+          const completedTrack = activeTrackRef.current;
+          if (completedTrack && !milestonesFiredRef.current.completed) {
             milestonesFiredRef.current.completed = true;
             sendTelemetry({
               event_type: 'completed',
-              track_id: transitingTrack.id,
-              ...getTrackMeta(transitingTrack),
-              position_ms: Math.round(playheadRef.current * 1000),
-              duration_ms: Math.round((durationRef.current || 0) * 1000) || transitingTrack.duration_ms,
+              track_id: completedTrack.id,
+              ...getTrackMeta(completedTrack),
+              position_ms: Math.round((durationRef.current || playheadRef.current) * 1000),
+              duration_ms: Math.round((durationRef.current || 0) * 1000) || completedTrack.duration_ms,
               completion_ratio: 1.0,
               source: activeContextRef.current?.source,
               query: activeContextRef.current?.query,
             });
           }
-          break;
-        case 'transition_end': {
           const state = usePlayerStore.getState();
           if (state.repeatMode === 'one') break;
           state.playNext();
@@ -531,9 +531,12 @@ export function usePlayback() {
             import('@/lib/audioCache').then(async ({ cacheAudio, isAudioCached }) => {
               const alreadyCached = await isAudioCached(currentTrack.id);
               if (!alreadyCached && best.url) {
-                fetch(best.url)
-                  .then((res) => res.blob())
-                  .then((blob) => cacheAudio(currentTrack.id, blob, best.mime_type || 'audio/mp4'))
+                const streamUrl = getPlayableStreamUrl(best.url);
+                fetch(streamUrl)
+                  .then((res) => (res.ok ? res.blob() : null))
+                  .then((blob) => {
+                    if (blob) cacheAudio(currentTrack.id, blob, best.mime_type || 'audio/mp4');
+                  })
                   .catch(() => {});
               }
             }).catch(() => {});

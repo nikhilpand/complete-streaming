@@ -12,28 +12,57 @@ const testFiles = fs
   .sort()
   .map((f) => path.join('tests', f));
 
-console.log(`Running ${testFiles.length} test files with tsx --test...`);
+console.log(`Running ${testFiles.length} test files with tsx --test...\n`);
 
 const isWindows = process.platform === 'win32';
-let totalPassed = 0;
-let totalFailed = 0;
+let filesPassed = 0;
+let filesFailed = 0;
+let totalTestsRun = 0;
+let totalTestsPassed = 0;
+let totalTestsFailed = 0;
 
 for (const file of testFiles) {
   const result = spawnSync(
     isWindows ? 'npx.cmd' : 'npx',
     ['tsx', '--test', file],
-    { stdio: 'inherit', shell: isWindows }
+    { encoding: 'utf-8', shell: isWindows }
   );
+
+  const stdout = result.stdout || '';
+  const stderr = result.stderr || '';
+  if (stdout) process.stdout.write(stdout);
+  if (stderr) process.stderr.write(stderr);
+
+  // Parse total tests and pass/fail from Node test runner output
+  const output = stdout + '\n' + stderr;
+  const passMatches = [...output.matchAll(/ℹ pass (\d+)/g)];
+  const failMatches = [...output.matchAll(/ℹ fail (\d+)/g)];
+
+  // Last match in the file output represents the file total
+  if (passMatches.length > 0) {
+    const lastPass = parseInt(passMatches[passMatches.length - 1][1], 10);
+    totalTestsPassed += lastPass;
+  }
+  if (failMatches.length > 0) {
+    const lastFail = parseInt(failMatches[failMatches.length - 1][1], 10);
+    totalTestsFailed += lastFail;
+  }
+
   if (result.status !== 0) {
-    totalFailed++;
+    filesFailed++;
     console.error(`FAILED: ${file}`);
   } else {
-    totalPassed++;
+    filesPassed++;
   }
 }
 
+totalTestsRun = totalTestsPassed + totalTestsFailed;
+
 console.log(`\n========================================`);
-console.log(`Test Files: ${totalPassed} passed, ${totalFailed} failed (Total: ${testFiles.length})`);
+console.log(`Test Execution Summary:`);
+console.log(`  Test Files: ${filesPassed} passed, ${filesFailed} failed (Total: ${testFiles.length})`);
+console.log(`  Tests:      ${totalTestsPassed} passed, ${totalTestsFailed} failed (Total: ${totalTestsRun})`);
 console.log(`========================================\n`);
 
-process.exit(totalFailed > 0 ? 1 : 0);
+process.exit(filesFailed > 0 ? 1 : 0);
+

@@ -137,4 +137,33 @@ describe('usePlayback Architecture & Transition Integration', () => {
     assert.equal(audioManager.getRepeatMode(), 'one');
     assert.equal(audioManager.standbyPipeline.isLoaded, false, 'Standby pipeline must be purged');
   });
+
+  test('transition_end advances queue at end boundary in repeat-all mode', () => {
+    const store = usePlayerStore.getState();
+    store.setQueue([songA, songB], 1); // at last index
+    usePlayerStore.setState({ repeatMode: 'all', currentTrack: songB });
+
+    // In repeat-all mode, playNext wraps around to index 0
+    store.playNext();
+    assert.equal(usePlayerStore.getState().queueIndex, 0);
+    assert.equal(usePlayerStore.getState().currentTrack?.id, 'song_A');
+  });
+
+  test('user skip during active transition cancels transition and clears standby', async () => {
+    audioManager.init();
+    await audioManager.load('https://cdn.example.com/songA.mp3', 'song_A');
+    audioManager.preload('https://cdn.example.com/songB.mp3', 'song_B');
+
+    // Simulate transition in progress
+    await audioManager.crossfadeToStandby(3);
+    assert.equal(audioManager.standbyPipeline.isLoaded, true);
+
+    // User hits next track
+    audioManager.cancelTransition({ clearStandby: true });
+
+    assert.equal(audioManager.standbyPipeline.isLoaded, false);
+    assert.equal(audioManager.standbyPipeline.trackId, null);
+    assert.equal(audioManager.activePipeline.trackId, 'song_A');
+  });
 });
+

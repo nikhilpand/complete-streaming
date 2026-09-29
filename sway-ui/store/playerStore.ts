@@ -82,6 +82,25 @@ export function fisherYates(length: number): number[] {
   return arr;
 }
 
+/** Remap shuffleOrder indices when an item at removedIndex is removed */
+export function remapShuffleOnRemove(order: number[], removedIndex: number): number[] {
+  if (!order || order.length === 0) return [];
+  return order
+    .filter((idx) => idx !== removedIndex)
+    .map((idx) => (idx > removedIndex ? idx - 1 : idx));
+}
+
+/** Remap shuffleOrder indices when an item moves from fromIndex to toIndex */
+export function remapShuffleOnMove(order: number[], fromIndex: number, toIndex: number): number[] {
+  if (!order || order.length === 0) return [];
+  return order.map((idx) => {
+    if (idx === fromIndex) return toIndex;
+    if (fromIndex < toIndex && idx > fromIndex && idx <= toIndex) return idx - 1;
+    if (fromIndex > toIndex && idx >= toIndex && idx < fromIndex) return idx + 1;
+    return idx;
+  });
+}
+
 // In-memory fallback for environments without localStorage (Node.js test runners, SSR)
 const memStore = new Map<string, string>();
 const safeStorage = {
@@ -210,15 +229,16 @@ export const usePlayerStore = create<PlayerStore>()(
             };
           }),
         removeFromQueue: (index: number) => {
-          const { queue, queueIndex } = get();
+          const { queue, queueIndex, shuffleOrder, isShuffled } = get();
           if (index < 0 || index >= queue.length) return;
 
           if (queue.length <= 1) {
-            set({ queue: [], queueIndex: 0, currentTrack: null, status: 'idle' });
+            set({ queue: [], queueIndex: 0, currentTrack: null, status: 'idle', shuffleOrder: [] });
             return;
           }
 
           const updated = queue.filter((_, i) => i !== index);
+          const updatedShuffle = isShuffled ? remapShuffleOnRemove(shuffleOrder, index) : [];
 
           if (index === queueIndex) {
             const nextTrack = updated[Math.min(index, updated.length - 1)];
@@ -229,21 +249,26 @@ export const usePlayerStore = create<PlayerStore>()(
               currentTrack: nextTrack,
               status: 'loading',
               error: null,
+              shuffleOrder: updatedShuffle,
               queueGeneration: s.queueGeneration + 1,
             }));
           } else if (index < queueIndex) {
-            set({ queue: updated, queueIndex: queueIndex - 1 });
+            set({ queue: updated, queueIndex: queueIndex - 1, shuffleOrder: updatedShuffle });
           } else {
-            set({ queue: updated });
+            set({ queue: updated, shuffleOrder: updatedShuffle });
           }
         },
         clearQueue: () => {
-          const { queue, queueIndex } = get();
+          const { queue, queueIndex, shuffleOrder, isShuffled } = get();
           if (!queue.length) return;
-          set({ queue: queue.slice(0, queueIndex + 1) });
+          const updated = queue.slice(0, queueIndex + 1);
+          const updatedShuffle = isShuffled
+            ? shuffleOrder.filter((idx) => idx <= queueIndex)
+            : [];
+          set({ queue: updated, shuffleOrder: updatedShuffle });
         },
         moveQueueItem: (fromIndex: number, toIndex: number) => {
-          const { queue, queueIndex } = get();
+          const { queue, queueIndex, shuffleOrder, isShuffled } = get();
           if (
             fromIndex < 0 ||
             fromIndex >= queue.length ||
@@ -267,7 +292,11 @@ export const usePlayerStore = create<PlayerStore>()(
             newQueueIndex = queueIndex + 1;
           }
 
-          set({ queue: cloned, queueIndex: newQueueIndex });
+          const updatedShuffle = isShuffled
+            ? remapShuffleOnMove(shuffleOrder, fromIndex, toIndex)
+            : [];
+
+          set({ queue: cloned, queueIndex: newQueueIndex, shuffleOrder: updatedShuffle });
         },
         playNext: () => {
           const { queue, queueIndex, repeatMode, isShuffled } = get();

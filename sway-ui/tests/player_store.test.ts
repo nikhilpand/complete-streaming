@@ -326,4 +326,51 @@ describe('Zustand Player Store Hardcore Edge Cases', () => {
     store.setError(null);
     assert.equal(usePlayerStore.getState().error, null);
   });
+
+  test('removeFromQueue remaps shuffleOrder preserving valid indices', () => {
+    const songs = [
+      createMockSong('s0', 'Song 0'),
+      createMockSong('s1', 'Song 1'),
+      createMockSong('s2', 'Song 2'),
+      createMockSong('s3', 'Song 3'),
+    ];
+    usePlayerStore.setState({
+      queue: songs,
+      queueIndex: 0,
+      currentTrack: songs[0],
+      isShuffled: true,
+      shuffleOrder: [2, 0, 3, 1],
+    });
+
+    // Remove index 1 (s1)
+    usePlayerStore.getState().removeFromQueue(1);
+    const state = usePlayerStore.getState();
+
+    assert.equal(state.queue.length, 3);
+    assert.deepEqual(state.shuffleOrder, [1, 0, 2]);
+  });
+
+  test('moveQueueItem remaps shuffleOrder preserving relative permutation', () => {
+    const songs = [
+      createMockSong('s0', 'Song 0'),
+      createMockSong('s1', 'Song 1'),
+      createMockSong('s2', 'Song 2'),
+      createMockSong('s3', 'Song 3'),
+    ];
+    usePlayerStore.setState({
+      queue: songs,
+      queueIndex: 0,
+      currentTrack: songs[0],
+      isShuffled: true,
+      shuffleOrder: [2, 0, 3, 1],
+    });
+
+    // Move index 1 (s1) to index 3
+    usePlayerStore.getState().moveQueueItem(1, 3);
+    const state = usePlayerStore.getState();
+
+    assert.equal(state.queue.length, 4);
+    assert.deepEqual(state.shuffleOrder, [1, 0, 2, 3]);
+  });
 });
+

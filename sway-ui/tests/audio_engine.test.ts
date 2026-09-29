@@ -301,4 +301,47 @@ describe('AudioEngine Architecture, Correctness & Seamless Transitions', () => {
     assert.equal(useAudioSettings.getState().bassBoost, 60);
     assert.equal(useAudioSettings.getState().spatialWidth, 140);
   });
+
+  test('A ends naturally during active crossfade -> does not clear standby or emit premature ended', async () => {
+    const engine = new AudioEngine();
+    engine.init();
+    await engine.load('https://cdn.example.com/trackA.mp3', 'track_A');
+    engine.preload('https://cdn.example.com/trackB.mp3', 'track_B');
+
+    // Trigger crossfade transition
+    await engine.crossfadeToStandby(2);
+
+    let endedFired = false;
+    engine.subscribe((ev) => {
+      if (ev.type === 'ended') endedFired = true;
+    });
+
+    // Simulate active pipeline A reaching natural end while transition is active
+    engine.activePipeline.audio.dispatchEvent(new Event('ended'));
+
+    // Invariant: Standby pipeline B must NOT be cleared, and ended event must NOT be emitted
+    assert.equal(endedFired, false, 'Premature ended event must NOT be emitted during transition');
+    assert.equal(engine.standbyPipeline.isLoaded, true, 'Standby pipeline B must remain loaded during transition');
+    assert.equal(engine.standbyPipeline.trackId, 'track_B', 'Standby trackId must be preserved');
+
+    // Clean up
+    engine.cancelTransition();
+  });
+
+  test('cancelTransition clears standby pipeline state cleanly', async () => {
+    const engine = new AudioEngine();
+    engine.init();
+    await engine.load('https://cdn.example.com/trackA.mp3', 'track_A');
+    engine.preload('https://cdn.example.com/trackB.mp3', 'track_B');
+
+    assert.equal(engine.standbyPipeline.isLoaded, true);
+    assert.equal(engine.standbyPipeline.trackId, 'track_B');
+
+    engine.cancelTransition({ clearStandby: true });
+
+    assert.equal(engine.standbyPipeline.isLoaded, false);
+    assert.equal(engine.standbyPipeline.trackId, null);
+    assert.equal(engine.standbyPipeline.audio.src, '');
+  });
 });
+
